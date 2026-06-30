@@ -9,6 +9,8 @@ import MusicControl from './components/MusicControl.jsx';
 import VRButton from './components/VRButton.jsx';
 import EyeTrackingControl from './components/EyeTrackingControl.jsx';
 import MultiplayerCursors from './components/MultiplayerCursors.jsx';
+import CockpitToggle from './cockpit/CockpitToggle.jsx';
+import { useShipStore } from './cockpit/useShipStore.js';
 import { PROJECTS_DATA, NODES } from './data/nodes.js';
 
 // Lazy-load the heavy 3D scene so it doesn't block initial paint
@@ -130,6 +132,23 @@ const EMPTY_TRACKING = { dataRef: null, gesture: 'none', isActive: false };
 export default function App() {
   const [selectedNode, setSelectedNode]     = useState(null);
   const [selectedPlanetId, setSelectedPlanetId] = useState(null);
+  const setMode = useShipStore((s) => s.setMode);
+  const enterCockpit = useShipStore((s) => s.enterCockpit);
+  const exitCockpit = useShipStore((s) => s.exitCockpit);
+  const mode = useShipStore((s) => s.mode);
+  const showSolarHud = mode === 'solar';
+
+  const handleEnterCockpit = useCallback(() => {
+    setSelectedNode(null);
+    setSelectedPlanetId(null);
+    enterCockpit();
+  }, [enterCockpit]);
+
+  const handleExitCockpit = useCallback(() => {
+    setSelectedNode(null);
+    setSelectedPlanetId(null);
+    exitCockpit();
+  }, [exitCockpit]);
   // Hand and eye tracking each populate their own state. Hand wins when both
   // are active (it's the higher-precision marquee feature); eye is the
   // fallback hands-free path. Either source feeds the SAME GestureRaycaster
@@ -184,15 +203,15 @@ export default function App() {
   const handleClose = useCallback(() => {
     const wasProjectsList = selectedNode?.content?.type === 'projects_list';
     setSelectedNode(null);
-    if (!wasProjectsList) {
-      setSelectedPlanetId(null);
-    }
-  }, [selectedNode]);
+    if (!wasProjectsList) setSelectedPlanetId(null);
+    if (useShipStore.getState().mode === 'section') setMode('cockpit');
+  }, [selectedNode, setMode]);
 
   const handleDeselect = useCallback(() => {
     setSelectedNode(null);
     setSelectedPlanetId(null);
-  }, []);
+    if (useShipStore.getState().mode === 'section') setMode('cockpit');
+  }, [setMode]);
 
   const handleVoiceCommand = useCallback((cmd) => {
     if (cmd === '__back') {
@@ -264,6 +283,7 @@ export default function App() {
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-brand-bg">
+      <CockpitToggle onEnter={handleEnterCockpit} onExit={handleExitCockpit} />
       <NavBar
         onVoiceCommand={handleVoiceCommand}
         focusedCategory={focusedCategory}
@@ -349,7 +369,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <HeroText hasSelectedNode={!!selectedNode || !!selectedPlanetId} />
+      {showSolarHud && <HeroText hasSelectedNode={!!selectedNode || !!selectedPlanetId} />}
 
       <NodeCard
         node={selectedNode}
@@ -386,7 +406,7 @@ export default function App() {
         </div>
       )}
 
-      <HUD gestureMode={gestureData.isActive} />
+      {showSolarHud && <HUD gestureMode={gestureData.isActive} />}
 
       <MultiplayerCursors />
 

@@ -9,6 +9,8 @@ import { Code2, Building2, Globe } from 'lucide-react';
 import * as THREE from 'three';
 import { NODES } from '../data/nodes.js';
 import { xrStore } from '../lib/xrStore.js';
+import Cockpit from '../cockpit/Cockpit.jsx';
+import { useShipStore } from '../cockpit/useShipStore.js';
 
 const IS_MOBILE = typeof window !== 'undefined' &&
   (/Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i.test(navigator.userAgent) ||
@@ -1111,6 +1113,7 @@ function SceneContent({ onNodeSelect, onPlanetSelect, onProjectSelect, selectedP
   const orbitRef = useRef();
   const posRef   = useRef({});
   const nodeMap  = useMemo(() => Object.fromEntries(NODES.map((n) => [n.id, n])), []);
+  const mode     = useShipStore((s) => s.mode);
 
   useEffect(() => { posRef.current['about'] = { x: 0, y: 0, z: 0 }; }, []);
 
@@ -1183,7 +1186,7 @@ function SceneContent({ onNodeSelect, onPlanetSelect, onProjectSelect, selectedP
 
       {sunNode && (
         <Sun node={sunNode} isSelected={selectedId === sunNode.id} isHovered={hoveredId === sunNode.id}
-          onClick={handleSelect} onHover={setHoveredId} hideLabel={cardOpen}
+          onClick={handleSelect} onHover={setHoveredId} hideLabel={cardOpen || mode !== 'solar'}
           onMeshReady={onSunReady} />
       )}
 
@@ -1191,20 +1194,24 @@ function SceneContent({ onNodeSelect, onPlanetSelect, onProjectSelect, selectedP
         <Planet key={n.id} node={n}
           isSelected={selectedId === n.id} isHovered={hoveredId === n.id}
           onClick={handleSelect} onHover={setHoveredId}
-          hideLabel={cardOpen}
+          hideLabel={cardOpen || mode !== 'solar'}
           onPositionUpdate={handlePositionUpdate}
           onProjectSelect={n.content?.type === 'projects_hub' ? onProjectSelect : undefined}
         />
       ))}
 
-      <CameraController selectedId={selectedId} posRef={posRef} orbitRef={orbitRef} />
+      <Cockpit posRef={posRef} onEngage={handleSelect} />
+
+      {mode === 'solar' && (
+        <CameraController selectedId={selectedId} posRef={posRef} orbitRef={orbitRef} />
+      )}
 
       <OrbitControls ref={orbitRef} enablePan={false} enableZoom zoomSpeed={0.7} rotateSpeed={0.45}
-        minDistance={3} maxDistance={70} enabled={!gestureMode} makeDefault
-        autoRotate autoRotateSpeed={0.35} />
+        minDistance={3} maxDistance={70} enabled={mode === 'solar' && !gestureMode} makeDefault
+        autoRotate={mode === 'solar'} autoRotateSpeed={0.35} />
 
-      {gestureMode && !cardOpen && !selectedId && <GestureCamera gestureDataRef={gestureDataRef} />}
-      {gestureMode && !cardOpen && (
+      {gestureMode && mode === 'solar' && !cardOpen && !selectedId && <GestureCamera gestureDataRef={gestureDataRef} />}
+      {gestureMode && mode === 'solar' && !cardOpen && (
         <GestureRaycaster gestureDataRef={gestureDataRef} gesture={gesture}
           onHover={setHoveredId} onSelect={handleGestureSelect} onDwellProgress={onDwellProgress}
           allowedNodeIds={selectedId === 'projects' ? ['proj_personal', 'proj_work'] : null} />

@@ -1,0 +1,28 @@
+/* Flight-deck wake-up + minimal cockpit HUD ------------------------------------ */
+.fd-boot{position:fixed;inset:0;z-index:60;background:#000;display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center}
+.fd-lidT,.fd-lidB{position:absolute;left:0;right:0;height:52%;background:#000;z-index:2;transition:transform 1s cubic-bezier(.6,0,.2,1)}
+.fd-lidT{top:0}.fd-lidB{bottom:0}
+.fd-boot.shut .fd-lidT,.fd-boot.shut .fd-lidB{transform:translateY(0)}
+.fd-boot.open .fd-lidT{transform:translateY(-100%)}.fd-boot.open .fd-lidB{transform:translateY(100%)}
+.fd-bc{position:relative;z-index:3;opacity:0;filter:blur(9px);transition:opacity .8s,filter .9s}
+.fd-bc.clear{opacity:1;filter:blur(0)}
+.fd-w{font-family:ui-monospace,monospace;font-size:12px;letter-spacing:.32em;color:#6fb6d6;min-height:16px;margin-bottom:8px}
+.fd-t{font-size:clamp(30px,7vw,64px);font-weight:800;letter-spacing:.2em;background:linear-gradient(180deg,#eafaff,#00ffcc);-webkit-background-clip:text;background-clip:text;color:transparent;text-shadow:0 0 44px rgba(0,255,204,.3)}
+.fd-s{font-family:ui-monospace,monospace;font-size:13px;color:#9fc5dd;letter-spacing:.18em;margin-top:8px}
+.fd-seat{margin-top:32px;font-family:ui-monospace,monospace;font-size:12.5px;letter-spacing:.18em;color:#04231d;background:linear-gradient(90deg,#00ffcc,#9bffe9);border:none;padding:14px 30px;border-radius:11px;cursor:pointer;box-shadow:0 0 30px rgba(0,255,204,.5);opacity:0;transform:translateY(8px);transition:.5s;pointer-events:none}
+.fd-seat.on{opacity:1;transform:none;pointer-events:auto}
+.fd-seat:hover{box-shadow:0 0 50px rgba(0,255,204,.9);transform:translateY(-2px)}
+.fd-fade{position:fixed;inset:0;z-index:70;background:#000;opacity:0;pointer-events:none;transition:opacity .5s}
+.fd-fade.on{opacity:1}
+.fd-hint{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:25;display:flex;gap:8px;flex-wrap:wrap;justify-content:center;pointer-events:none}
+.fd-chip{font-family:ui-monospace,monospace;font-size:10.5px;letter-spacing:.06em;color:#bfe9df;background:rgba(12,18,28,.55);backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.08);padding:7px 11px;border-radius:10px}
+.fd-chip b{color:#00ffcc}
+
+/* Enter/Exit cockpit toggle (top-right) + cockpit control hints --------------- */
+.fd-toggle{position:fixed;top:76px;right:16px;z-index:35;display:inline-flex;align-items:center;gap:8px;
+  font-family:ui-monospace,monospace;font-size:12px;letter-spacing:.08em;color:#bff7ec;
+  background:rgba(8,16,24,.6);border:1px solid rgba(0,255,204,.3);padding:9px 15px;border-radius:999px;
+  cursor:pointer;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);transition:.18s}
+.fd-toggle:hover{color:#fff;border-color:#00ffcc;box-shadow:0 0 22px rgba(0,255,204,.3)}
+.fd-toggle .dot{width:7px;height:7px;border-radius:50%;background:#00ffcc;box-shadow:0 0 10px #00ffcc}
+.fd-cockhint{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:25;display:flex;gap:8px;flex-wrap:wrap;justify-content:center;pointer-events:none}
