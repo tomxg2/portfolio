@@ -1,0 +1,43 @@
+{
+  "name": "portfolio-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@mediapipe/hands": "^0.4.1675469240",
+    "@mediapipe/tasks-vision": "^0.10.35",
+    "@react-three/drei": "^9.99.0",
+    "@react-three/fiber": "^8.15.19",
+    "@react-three/postprocessing": "^2.16.2",
+    "@react-three/xr": "^6.6.30",
+    "@supabase/supabase-js": "^2.108.2",
+    "@theatre/core": "^0.7.2",
+    "@theatre/r3f": "^0.7.2",
+    "camera-controls": "^2.8.3",
+    "framer-motion": "^11.0.6",
+    "gsap": "^3.15.0",
+    "lucide-react": "^1.21.0",
+    "postprocessing": "^6.39.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "three": "^0.175.0",
+    "tone": "^15.1.22",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@tailwindcss/forms": "^0.5.7",
+    "@types/react": "^18.2.55",
+    "@types/react-dom": "^18.2.19",
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.17",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
+    "vite": "^5.1.2"
+  }
+}
