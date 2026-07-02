@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect, lazy, Suspense } from 'react'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { Code2, Building2, ArrowLeft } from 'lucide-react';
 import NodeCard from './components/NodeCard.jsx';
+import SunTransition from './components/SunTransition.jsx';
 import HUD from './components/HUD.jsx';
 import GestureControl from './components/GestureControl.jsx';
 import VoiceControl from './components/VoiceControl.jsx';
@@ -10,6 +11,7 @@ import VRButton from './components/VRButton.jsx';
 import EyeTrackingControl from './components/EyeTrackingControl.jsx';
 import MultiplayerCursors from './components/MultiplayerCursors.jsx';
 import CockpitToggle from './cockpit/CockpitToggle.jsx';
+import WakeUp, { seenWake, markWake } from './cockpit/WakeUp.jsx';
 import { useShipStore } from './cockpit/useShipStore.js';
 import { PROJECTS_DATA, NODES } from './data/nodes.js';
 
@@ -132,15 +134,20 @@ const EMPTY_TRACKING = { dataRef: null, gesture: 'none', isActive: false };
 export default function App() {
   const [selectedNode, setSelectedNode]     = useState(null);
   const [selectedPlanetId, setSelectedPlanetId] = useState(null);
+  const [sunTransition, setSunTransition]   = useState(false);
+  const [wakeOpen, setWakeOpen]             = useState(false);
   const setMode = useShipStore((s) => s.setMode);
   const enterCockpit = useShipStore((s) => s.enterCockpit);
   const exitCockpit = useShipStore((s) => s.exitCockpit);
   const mode = useShipStore((s) => s.mode);
   const showSolarHud = mode === 'solar';
 
+  // First boarding ever (button or 3D ship click) plays the WakeUp intro;
+  // it flips the ship store itself at the black point of its exit fade.
   const handleEnterCockpit = useCallback(() => {
     setSelectedNode(null);
     setSelectedPlanetId(null);
+    if (!seenWake()) { setWakeOpen(true); return; }
     enterCockpit();
   }, [enterCockpit]);
 
@@ -188,13 +195,27 @@ export default function App() {
     return () => cancelAnimationFrame(raf);
   }, [gestureData.isActive, gestureData.dataRef]);
 
+  const sunTransitionTimer = useRef(null);
+  useEffect(() => () => clearTimeout(sunTransitionTimer.current), []);
+
   const handlePlanetSelect = useCallback((id) => {
     setSelectedPlanetId(id);
   }, []);
 
   const handleNodeSelect = useCallback((node) => {
+    // Sun click gets a full-screen warp overlay; the card slides in as the
+    // video fades to black so the two motions overlap and feel continuous.
+    // Skipped for users who prefer reduced motion — the card opens directly.
+    const reduceMotion = typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (node?.id === 'about' && !selectedNode && !sunTransition && !reduceMotion) {
+      setSunTransition(true);
+      clearTimeout(sunTransitionTimer.current);
+      sunTransitionTimer.current = setTimeout(() => setSelectedNode(node), 1350);
+      return;
+    }
     setSelectedNode(node);
-  }, []);
+  }, [selectedNode, sunTransition]);
 
   const handleProjectSelect = useCallback((type) => {
     setSelectedNode(PROJECTS_DATA[type]);
@@ -297,6 +318,7 @@ export default function App() {
             onNodeSelect={handleNodeSelect}
             onPlanetSelect={handlePlanetSelect}
             onProjectSelect={handleProjectSelect}
+            onEnterCockpit={handleEnterCockpit}
             onDeselect={handleDeselect}
             selectedPlanetId={selectedPlanetId}
             gestureMode={gestureData.isActive}
@@ -375,6 +397,19 @@ export default function App() {
         node={selectedNode}
         onClose={handleClose}
       />
+
+      <AnimatePresence>
+        {sunTransition && (
+          <SunTransition onDone={() => setSunTransition(false)} />
+        )}
+      </AnimatePresence>
+
+      {wakeOpen && (
+        <WakeUp
+          onBoard={() => { markWake(); enterCockpit(); }}
+          onDone={() => setWakeOpen(false)}
+        />
+      )}
 
       {gestureData.isActive && !selectedNode && (
         <div

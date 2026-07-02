@@ -1,6 +1,6 @@
-import { useRef, useMemo, useEffect, useState, useCallback } from 'react';
+import { useRef, useMemo, useEffect, useState, useCallback, Suspense } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, Html, Line, PerformanceMonitor } from '@react-three/drei';
+import { OrbitControls, Html, Line, PerformanceMonitor, useGLTF } from '@react-three/drei';
 import { EffectComposer, Bloom, GodRays } from '@react-three/postprocessing';
 import { BlendFunction } from 'postprocessing';
 import { XR } from '@react-three/xr';
@@ -9,6 +9,9 @@ import { Code2, Building2, Globe } from 'lucide-react';
 import * as THREE from 'three';
 import { NODES } from '../data/nodes.js';
 import { xrStore } from '../lib/xrStore.js';
+import {
+  REAL_PLANET_TEXTURES, EARTH_CLOUDS_URL, SATURN_RING_URL, SUN_URL, loadCachedTexture,
+} from '../lib/planetTextures.js';
 import Cockpit from '../cockpit/Cockpit.jsx';
 import { useShipStore } from '../cockpit/useShipStore.js';
 
@@ -30,39 +33,14 @@ function makeRng(seed) {
   return () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
 }
 
-// ── Real planet textures (Solar System Scope, CC-BY 4.0) ─────────────────────
-// Each portfolio planet maps to a real solar-system body via `realPlanet` on
-// NODES. 2K JPEGs live in /public/textures/planets/. Loaded once, shared across
-// every instance — the second visit is a free GPU cache hit.
-const REAL_PLANET_TEXTURES = {
-  mercury: '/textures/planets/2k_mercury.jpg',
-  venus:   '/textures/planets/2k_venus_atmosphere.jpg',
-  earth:   '/textures/planets/2k_earth_daymap.jpg',
-  mars:    '/textures/planets/2k_mars.jpg',
-  saturn:  '/textures/planets/2k_saturn.jpg',
-  neptune: '/textures/planets/2k_neptune.jpg',
-};
-const EARTH_CLOUDS_URL = '/textures/planets/2k_earth_clouds.jpg';
-const SATURN_RING_URL  = '/textures/planets/2k_saturn_ring_alpha.png';
-const SUN_URL          = '/textures/planets/2k_sun.jpg';
+// Planet texture URLs + cached loader live in lib/planetTextures.js — shared
+// with the cockpit's destination holograms.
 
 // Only Earth gets a Fresnel atmosphere — other bodies kept bare so the surface
 // texture reads cleanly. Per user preference.
 const REAL_PLANET_ATMOSPHERES = {
   earth: { color: '#7cb3ff', intensity: 1.05 }, // Rayleigh-scattered blue
 };
-
-const _textureCache = new Map();
-const _textureLoader = new THREE.TextureLoader();
-function loadCachedTexture(url, { srgb = true } = {}) {
-  const key = url + (srgb ? '#srgb' : '#linear');
-  if (_textureCache.has(key)) return _textureCache.get(key);
-  const tex = _textureLoader.load(url);
-  if (srgb) tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
-  _textureCache.set(key, tex);
-  return tex;
-}
 
 // Build a RingGeometry whose UVs run radially (u=0 inner → u=1 outer) so the
 // solarsystemscope ring strip wraps as a true radial profile instead of
@@ -297,6 +275,143 @@ function ShootingStar({ startPos, endPos, born }) {
   );
 }
 
+// ── Player ship — CC0 fighter (Quaternius) cruising the outer system ──────────
+// This is "your" ship: clicking it boards the flight deck, tying the solar
+// overview and cockpit mode into one narrative. Hidden while you're inside it.
+const SHIP_URL = '/models/player_ship.glb';
+const SHIP_ORBIT_R = 27;
+const SHIP_ORBIT_SPEED = 0.045;
+
+function PlayerShip({ onBoard }) {
+  const { scene: shipScene } = useGLTF(SHIP_URL);
+  const [hovered, setHovered] = useState(false);
+  const groupRef = useRef();
+  const innerRef = useRef();
+  const angleRef = useRef(0.4); // start in view of the default camera
+  const scaleVec = useMemo(() => new THREE.Vector3(1, 1, 1), []);
+  const mode = useShipStore((s) => s.mode);
+
+  // Normalize whatever size the GLB comes in at to ~2.6 scene units and
+  // recentre it, then give the materials the same emissive floor the planets
+  // use so the dark side stays readable.
+  const ship = useMemo(() => {
+    const s = shipScene.clone(true);
+    const box = new THREE.Box3().setFromObject(s);
+    const size = box.getSize(new THREE.Vector3());
+    const scale = 2.6 / Math.max(size.x, size.y, size.z);
+    s.scale.setScalar(scale);
+    const center = box.getCenter(new THREE.Vector3()).multiplyScalar(scale);
+    s.position.sub(center);
+    s.traverse((o) => {
+      if (o.isMesh && o.material) {
+        o.material = o.material.clone();
+        if (o.material.map) {
+          o.material.emissiveMap = o.material.map;
+          o.material.emissive = new THREE.Color('#ffffff');
+          o.material.emissiveIntensity = 0.22;
+        } else if (o.material.color) {
+          o.material.emissive = o.material.color.clone();
+          o.material.emissiveIntensity = 0.18;
+        }
+      }
+    });
+    return s;
+  }, [shipScene]);
+
+  useFrame((state, delta) => {
+    const g = groupRef.current;
+    if (!g) return;
+    angleRef.current += delta * SHIP_ORBIT_SPEED;
+    const a = angleRef.current;
+    g.position.set(Math.sin(a) * SHIP_ORBIT_R, 2.2, Math.cos(a) * SHIP_ORBIT_R);
+    g.rotation.y = a + Math.PI / 2; // nose along the direction of travel
+    const inner = innerRef.current;
+    if (inner) {
+      const t = state.clock.elapsedTime;
+      inner.position.y = Math.sin(t * 0.9) * 0.18;   // idle bob
+      inner.rotation.z = Math.sin(t * 0.55) * 0.07;  // gentle banking
+      scaleVec.setScalar(hovered ? 1.12 : 1);
+      inner.scale.lerp(scaleVec, 6 * delta);
+    }
+  });
+
+  const inSolar = mode === 'solar';
+
+  return (
+    <group ref={groupRef} visible={inSolar}>
+      <group ref={innerRef}>
+        <primitive
+          object={ship}
+          onClick={(e) => { if (!inSolar) return; e.stopPropagation(); onBoard?.(); }}
+          onPointerOver={(e) => { if (!inSolar) return; e.stopPropagation(); setHovered(true); document.body.style.cursor = 'pointer'; }}
+          onPointerOut={() => { setHovered(false); document.body.style.cursor = 'default'; }}
+        />
+        {/* generous hit sphere for gestures + easier clicking */}
+        <mesh userData={{ nodeId: 'ship' }}
+          onClick={(e) => { if (!inSolar) return; e.stopPropagation(); onBoard?.(); }}>
+          <sphereGeometry args={[2.0, 8, 8]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
+        {hovered && inSolar && (
+          <group position={[0, -1.5, 0]}>
+            <Html center zIndexRange={[9, 0]} style={{ pointerEvents: 'none', userSelect: 'none' }}>
+              <span style={{
+                color: '#ffb454', fontSize: '10px', fontFamily: 'monospace',
+                whiteSpace: 'nowrap', letterSpacing: '0.08em',
+                textShadow: '0 1px 4px #000, 0 0 10px #000',
+              }}>MY SHIP · CLICK TO BOARD</span>
+            </Html>
+          </group>
+        )}
+      </group>
+    </group>
+  );
+}
+
+useGLTF.preload(SHIP_URL);
+
+// ── Asteroid belt — instanced rock field between Experience and Projects ──────
+// One InstancedMesh = one draw call. Rotations/scales are baked at build time;
+// only the parent group spins, so the per-frame cost is a single matrix update.
+const BELT_COUNT = IS_MOBILE ? 120 : 380;
+const BELT_INNER = 12.9;
+const BELT_OUTER = 13.9;
+
+function AsteroidBelt() {
+  const groupRef = useRef();
+  const meshRef = useRef();
+
+  useEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    const dummy = new THREE.Object3D();
+    const rng = makeRng(1337);
+    for (let i = 0; i < BELT_COUNT; i++) {
+      const a = rng() * Math.PI * 2;
+      const r = BELT_INNER + rng() * (BELT_OUTER - BELT_INNER);
+      dummy.position.set(Math.sin(a) * r, (rng() - 0.5) * 0.5, Math.cos(a) * r);
+      dummy.rotation.set(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI);
+      dummy.scale.setScalar(0.03 + rng() * 0.075);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+  }, []);
+
+  useFrame((_, delta) => {
+    if (groupRef.current) groupRef.current.rotation.y += delta * 0.008;
+  });
+
+  return (
+    <group ref={groupRef}>
+      <instancedMesh ref={meshRef} args={[null, null, BELT_COUNT]}>
+        <dodecahedronGeometry args={[1, 0]} />
+        <meshStandardMaterial color="#9a9187" emissive="#6a635b" emissiveIntensity={0.18} roughness={0.95} metalness={0.05} />
+      </instancedMesh>
+    </group>
+  );
+}
+
 // ── Fresnel atmosphere glow (two layers: tight rim + wide soft halo) ──────────
 // `baseIntensity` scales both layers — set per planet from REAL_PLANET_ATMOSPHERES.
 // Hover/select bumps are small so the atmosphere never drowns the surface texture.
@@ -333,7 +448,7 @@ function AtmosphereGlow({ size, color, baseIntensity = 1.0, isHovered, isSelecte
     depthWrite:  false,
     blending:    THREE.AdditiveBlending,
     side:        THREE.FrontSide,
-  }), [color]);
+  }), [color, baseIntensity]);
 
   // Outer wide halo — gentle falloff, extends ~2x planet radius into space
   const outerMaterial = useMemo(() => new THREE.ShaderMaterial({
@@ -506,7 +621,7 @@ function Sun({ node, isSelected, isHovered, onClick, onHover, hideLabel, onMeshR
     `,
     transparent: true, depthWrite: false,
     blending: THREE.AdditiveBlending, side: THREE.FrontSide,
-  }), []); // eslint-disable-line react-hooks/exhaustive-deps
+  }), []);
 
   useFrame((_, delta) => {
     if (meshRef.current) meshRef.current.rotation.y += delta * 0.05;
@@ -1106,7 +1221,7 @@ function SceneLoader() {
 }
 
 // ── Scene content ─────────────────────────────────────────────────────────────
-function SceneContent({ onNodeSelect, onPlanetSelect, onProjectSelect, selectedPlanetId,
+function SceneContent({ onNodeSelect, onPlanetSelect, onProjectSelect, onEnterCockpit, selectedPlanetId,
   gestureMode, gestureDataRef, gesture, onDwellProgress, cardOpen, onSunReady }) {
   const [hoveredId, setHoveredId] = useState(null);
   const selectedId = selectedPlanetId; // controlled externally by App
@@ -1163,9 +1278,10 @@ function SceneContent({ onNodeSelect, onPlanetSelect, onProjectSelect, selectedP
   const handleGestureSelect = useCallback((nodeId) => {
     if (nodeId === 'proj_personal') { onProjectSelect?.('personal'); return; }
     if (nodeId === 'proj_work')     { onProjectSelect?.('work');     return; }
+    if (nodeId === 'ship')          { onEnterCockpit?.();            return; }
     const node = nodeMap[nodeId];
     if (node) handleSelect(node);
-  }, [nodeMap, handleSelect, onProjectSelect]);
+  }, [nodeMap, handleSelect, onProjectSelect, onEnterCockpit]);
 
 
   const sunNode     = NODES.find((n) => n.isSun);
@@ -1178,6 +1294,10 @@ function SceneContent({ onNodeSelect, onPlanetSelect, onProjectSelect, selectedP
       <hemisphereLight color="#88aaff" groundColor="#221133" intensity={0.45} />
       <Nebula />
       <Stars count={STAR_COUNT} />
+      <AsteroidBelt />
+      <Suspense fallback={null}>
+        <PlayerShip onBoard={onEnterCockpit} />
+      </Suspense>
       {!IS_MOBILE && <ShootingStars />}
 
       {planetNodes.map((n) => (
@@ -1221,7 +1341,7 @@ function SceneContent({ onNodeSelect, onPlanetSelect, onProjectSelect, selectedP
 }
 
 // ── Public component ──────────────────────────────────────────────────────────
-export default function Scene3D({ onNodeSelect, onPlanetSelect, onProjectSelect, onDeselect, selectedPlanetId, gestureMode, gestureDataRef, gesture, onDwellProgress, cardOpen }) {
+export default function Scene3D({ onNodeSelect, onPlanetSelect, onProjectSelect, onEnterCockpit, onDeselect, selectedPlanetId, gestureMode, gestureDataRef, gesture, onDwellProgress, cardOpen }) {
   const [webglSupported, setWebglSupported] = useState(true);
   const [ready, setReady] = useState(false);
   // Adaptive resolution: start at native DPR (capped at 2). If the GPU can't
@@ -1276,6 +1396,7 @@ export default function Scene3D({ onNodeSelect, onPlanetSelect, onProjectSelect,
         >
           <XR store={xrStore}>
             <SceneContent onNodeSelect={onNodeSelect} onPlanetSelect={onPlanetSelect} onProjectSelect={onProjectSelect}
+              onEnterCockpit={onEnterCockpit}
               selectedPlanetId={selectedPlanetId} gestureMode={gestureMode} gestureDataRef={gestureDataRef}
               gesture={gesture} onDwellProgress={onDwellProgress} cardOpen={cardOpen}
               onSunReady={setSunMesh} />
