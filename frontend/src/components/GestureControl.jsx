@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Camera, X, Hand, Timer, Maximize2, HandMetal, ShieldCheck, Sparkles } from 'lucide-react';
