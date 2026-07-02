@@ -1,11 +1,13 @@
 /* Flight-deck wake-up + minimal cockpit HUD ------------------------------------ */
-.fd-boot{position:fixed;inset:0;z-index:60;background:#000;display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center}
-.fd-lidT,.fd-lidB{position:absolute;left:0;right:0;height:52%;background:#000;z-index:2;transition:transform 1s cubic-bezier(.6,0,.2,1)}
+/* Transparent overlay: the black "eyelids" blink open to reveal the live scene */
+.fd-boot{position:fixed;inset:0;z-index:60;background:transparent;display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center;overflow:hidden;cursor:pointer}
+.fd-lidT,.fd-lidB{position:absolute;left:0;right:0;height:52%;background:#000;z-index:2;transition:transform .95s cubic-bezier(.6,0,.2,1)}
 .fd-lidT{top:0}.fd-lidB{bottom:0}
-.fd-boot.shut .fd-lidT,.fd-boot.shut .fd-lidB{transform:translateY(0)}
-.fd-boot.open .fd-lidT{transform:translateY(-100%)}.fd-boot.open .fd-lidB{transform:translateY(100%)}
-.fd-bc{position:relative;z-index:3;opacity:0;filter:blur(9px);transition:opacity .8s,filter .9s}
-.fd-bc.clear{opacity:1;filter:blur(0)}
+.fd-boot:not(.shut) .fd-lidT{transform:translateY(-101%)}
+.fd-boot:not(.shut) .fd-lidB{transform:translateY(101%)}
+.fd-bc{position:relative;z-index:3;opacity:0;filter:blur(9px);transition:opacity .8s,filter .9s;padding:48px 72px;border-radius:32px}
+.fd-bc.clear{opacity:1;filter:blur(0);background:radial-gradient(ellipse at center,rgba(0,0,0,.6) 0%,transparent 72%)}
+.fd-skip{position:absolute;bottom:26px;left:50%;transform:translateX(-50%);z-index:3;font-family:ui-monospace,monospace;font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:rgba(159,197,221,.45)}
 .fd-w{font-family:ui-monospace,monospace;font-size:12px;letter-spacing:.32em;color:#6fb6d6;min-height:16px;margin-bottom:8px}
 .fd-t{font-size:clamp(30px,7vw,64px);font-weight:800;letter-spacing:.2em;background:linear-gradient(180deg,#eafaff,#00ffcc);-webkit-background-clip:text;background-clip:text;color:transparent;text-shadow:0 0 44px rgba(0,255,204,.3)}
 .fd-s{font-family:ui-monospace,monospace;font-size:13px;color:#9fc5dd;letter-spacing:.18em;margin-top:8px}
