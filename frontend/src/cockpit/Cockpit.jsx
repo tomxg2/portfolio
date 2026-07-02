@@ -2,6 +2,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { NODES } from '../data/nodes.js';
 import { useShipStore } from './useShipStore.js';
 import { startHum, stopHum, warpWhoosh, hoverBlip, engageBeep, arrivalChime } from './shipAudio.js';
@@ -24,8 +25,8 @@ import { REAL_PLANET_TEXTURES, SUN_URL, loadCachedTexture } from '../lib/planetT
 
 // Where the deck floats relative to your solar system (system is centred at origin).
 // TUNE THESE to frame the planets in the window:
-const COCKPIT_POS = new THREE.Vector3(0, -2, 58); // lower Y = planets sit HIGHER in the window
-const LOOK_AT = new THREE.Vector3(0, 5, 0);        // point the seat aims at (the system); raise Y to lift planets
+const COCKPIT_POS = new THREE.Vector3(0, -9.5, 58); // lower Y = planets sit HIGHER in the window
+const LOOK_AT = new THREE.Vector3(0, 0, 0);        // point the seat aims at (the system); raise Y to lift planets
 const CABIN_LIGHT = 1.0;                            // master cabin brightness — raise if too dark, lower if too bright
 const OX = COCKPIT_POS.x, OY = COCKPIT_POS.y, OZ = COCKPIT_POS.z;
 
@@ -49,32 +50,38 @@ const SCRW = 640, SCRH = 320;
 // (Higgsfield: wall / floor / ceiling / dashboard). The pilot seat is a
 // generated GLB mounted separately in JSX (<PilotSeat/>). Footprint, seat
 // position, collision bounds and the nav screen transform are unchanged.
-function buildCockpit(tex) {
+function buildCockpit(tex, env) {
   const group = new THREE.Group();
   const blinkers = [];
 
-  // clone-with-repeat so one loaded texture can wrap several surfaces
-  const T = (t, rx, ry, ox = 0, oy = 0) => {
-    if (!t) return null;
-    const c = t.clone();
-    c.wrapS = c.wrapT = THREE.RepeatWrapping;
-    c.repeat.set(rx, ry);
-    c.offset.set(ox, oy);
-    c.needsUpdate = true;
-    return c;
+  // bake repeat/offset into the geometry UVs instead of cloning textures —
+  // texture clones each re-upload to the GPU (~5MB a piece adds up fast on
+  // iGPUs); with UV transforms every surface shares the same 12 textures
+  const uvXform = (g, rx, ry, ox = 0, oy = 0) => {
+    const uv = g.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * rx + ox, uv.getY(i) * ry + oy);
+    return g;
   };
-  // panel material with a soft self-illumination floor (same emissiveMap trick
-  // as the planets) so the generated art reads regardless of light tuning
-  const M = (map, { rough = .62, metal = .3, glow = .3, fallback = 0x39424d } = {}) => {
-    const m = new THREE.MeshStandardMaterial({ color: map ? 0xffffff : fallback, map, roughness: rough, metalness: metal });
-    if (map) { m.emissiveMap = map; m.emissive = new THREE.Color(0xffffff); m.emissiveIntensity = glow; }
-    else { m.emissive = new THREE.Color(fallback); m.emissiveIntensity = 0.12; }
+  // panel material: emissiveMap self-illumination floor (same trick as the
+  // planets) + real normal/roughness maps so light actually plays across the
+  // panel grooves instead of reading as a flat decal.
+  // b is a bundle { c: color, n: normal, r: roughness } — n/r generated
+  // offline from the art (scripts/gen-cockpit-maps.mjs, dev server running)
+  const M = (b, { rough = .62, metal = .3, glow = .3, fallback = 0x39424d, ns = 1 } = {}) => {
+    const m = new THREE.MeshStandardMaterial({ color: b ? 0xffffff : fallback, map: b?.c || null, roughness: rough, metalness: metal });
+    if (b) {
+      m.emissiveMap = b.c; m.emissive = new THREE.Color(0xffffff); m.emissiveIntensity = glow;
+      if (b.n) { m.normalMap = b.n; m.normalScale = new THREE.Vector2(ns, ns); }
+      else { m.bumpMap = b.c; m.bumpScale = 0.6; }
+      if (b.r) { m.roughnessMap = b.r; m.roughness = 1; }
+    } else { m.emissive = new THREE.Color(fallback); m.emissiveIntensity = 0.12; }
+    if (env) { m.envMap = env; m.envMapIntensity = 0.5; }
     return m;
   };
   const LM = (c) => new THREE.MeshBasicMaterial({ color: c, toneMapped: false });
-  const matDark = new THREE.MeshStandardMaterial({ color: 0x171c22, roughness: .7, metalness: .4 });
-  const metalBar = new THREE.MeshStandardMaterial({ color: 0xacb6c0, roughness: .3, metalness: .85 });
-  const accent = new THREE.MeshStandardMaterial({ color: 0x2fae9a, roughness: .5, metalness: .3, emissive: 0x00ffcc, emissiveIntensity: 0.35 });
+  const matDark = new THREE.MeshStandardMaterial({ color: 0x171c22, roughness: .45, metalness: .55, envMap: env || null, envMapIntensity: .9 });
+  const metalBar = new THREE.MeshStandardMaterial({ color: 0xacb6c0, roughness: .22, metalness: .9, envMap: env || null, envMapIntensity: 1.3 });
+  const accent = new THREE.MeshStandardMaterial({ color: 0x2fae9a, roughness: .5, metalness: .3, emissive: 0x00ffcc, emissiveIntensity: 0.35, envMap: env || null, envMapIntensity: .7 });
   const stripTeal = LM(0x59ffdd);
   const stripAmber = LM(0xffb454);
 
@@ -91,14 +98,17 @@ function buildCockpit(tex) {
   };
 
   // ── hull: octagonal tube along z, flat facets at floor / walls / ceiling ──
-  const hullMat = M(T(tex.wall, 4, 1.6), { rough: .72, metal: .28, glow: .27 });
+  const hullMat = M(tex.wall, { rough: .72, metal: .28, glow: .27, ns: 1.1 });
   hullMat.side = THREE.BackSide;
   const tubeGeo = new THREE.CylinderGeometry(3.2, 3.2, 10.4, 8, 1, true);
+  uvXform(tubeGeo, 4, 1.6);
   tubeGeo.rotateY(Math.PI / 8);   // facet centres to 0/45/90°…
   tubeGeo.rotateX(Math.PI / 2);   // axis along z
   const tube = new THREE.Mesh(tubeGeo, hullMat);
   tube.position.set(0, 1.4, 1.5);
   group.add(tube);
+  // shared front-side wall-panel material for caps / bulkheads / cabinets
+  const hullPanelMat = M(tex.wall, { glow: .28, ns: 1 });
   // glowing seams along the upper facet corners
   box(.03, .03, 9.8, -1.22, 4.32, 1.5, stripTeal, 0, 0, Math.PI / 4);
   box(.03, .03, 9.8, 1.22, 4.32, 1.5, stripTeal, 0, 0, -Math.PI / 4);
@@ -107,8 +117,9 @@ function buildCockpit(tex) {
   // (the bright light-panel "ceiling" art overpowered the cabin; it now only
   // dresses the ceiling troughs' surround below)
   const capGeo = new THREE.CircleGeometry(3.2, 8);
+  uvXform(capGeo, 1.8, 1.8);
   capGeo.rotateZ(Math.PI / 8);
-  const cap = new THREE.Mesh(capGeo, M(T(tex.wall, 1.8, 1.8), { glow: .28 }));
+  const cap = new THREE.Mesh(capGeo, hullPanelMat);
   cap.position.set(0, 1.4, 6.68); cap.rotation.y = Math.PI;
   group.add(cap);
   box(1.5, 2.3, .08, 0, 1.15, 6.6, matDark);                 // airlock slab
@@ -119,8 +130,9 @@ function buildCockpit(tex) {
 
   // ── floor: generated deck plating + glowing centre walkway to the dash ──
   const floorGeo = new THREE.PlaneGeometry(6.2, 10.4);
+  uvXform(floorGeo, 2, 3.4);
   floorGeo.rotateX(-Math.PI / 2);
-  const floor = new THREE.Mesh(floorGeo, M(T(tex.floor, 2, 3.4), { rough: .8, metal: .3, glow: .26 }));
+  const floor = new THREE.Mesh(floorGeo, M(tex.floor, { rough: .8, metal: .3, glow: .26 }));
   floor.position.set(0, 0, 1.5);
   group.add(floor);
   box(.04, .02, 9.4, -.55, .015, 1.5, stripTeal);
@@ -128,73 +140,163 @@ function buildCockpit(tex) {
 
   // ── ceiling: generated light-panel art on the top facet + physical troughs ──
   const ceilGeo = new THREE.PlaneGeometry(2.4, 9.8);
+  uvXform(ceilGeo, 1, 3.2);
   ceilGeo.rotateX(Math.PI / 2);                              // face down
-  const ceil = new THREE.Mesh(ceilGeo, M(T(tex.ceiling, 1, 3.2), { glow: .3 }));
+  const ceil = new THREE.Mesh(ceilGeo, M(tex.ceiling, { glow: .3 }));
   ceil.position.set(0, 4.35, 1.5);
   group.add(ceil);
   [-0.85, 0.85].forEach((x) => {
     box(.55, .05, 7.6, x, 4.33, 1.6, matDark);               // recess frame
-    box(.45, .05, 7.4, x, 4.3, 1.6, LM(0xeaf2ff));           // diffuser
+    box(.45, .05, 7.4, x, 4.3, 1.6, LM(0xb9cbdd));           // diffuser (kept below blow-out)
   });
 
-  // ── canopy glass (kept: ribs read as obstructions per earlier feedback) ──
+  // ── front bulkhead: solid wall with a trapezoid windshield cut into it ──
+  // the tube used to be open-ended here, so space showed all around the dash;
+  // now (like a real flight deck) only the framed windshield reads out
+  const octa = [];
+  for (let i = 0; i < 8; i++) {
+    const a = Math.PI / 8 + (i * Math.PI) / 4;               // matches the tube facets
+    octa.push(new THREE.Vector2(Math.cos(a) * 3.2, Math.sin(a) * 3.2));
+  }
+  const frontShape = new THREE.Shape(octa);
+  const winHole = new THREE.Path();                          // cap-local (tube centre y=1.4)
+  winHole.moveTo(-2.35, -0.15);
+  winHole.lineTo(-1.45, 2.15);
+  winHole.lineTo(1.45, 2.15);
+  winHole.lineTo(2.35, -0.15);
+  winHole.closePath();
+  frontShape.holes.push(winHole);
+  const front = new THREE.Mesh(uvXform(new THREE.ShapeGeometry(frontShape), .3, .3), hullPanelMat);
+  front.position.set(0, 1.4, -3.64);
+  group.add(front);
+  // windshield frame trim (divider posts removed — they only blocked the view)
+  [-1, 1].forEach((s) => {
+    box(.05, 2.48, .08, s * 1.91, 2.4, -3.56, stripTeal, 0, 0, s * .373); // slanted edges
+  });
+  box(4.72, .05, .08, 0, 1.25, -3.56, stripTeal);            // sill
+  box(2.92, .05, .08, 0, 3.55, -3.56, stripTeal);            // header
+  // one faint reflective pane fills the opening — the env-map sheen sells
+  // "there's glass here" without darkening the view
+  const paneShape = new THREE.Shape([
+    new THREE.Vector2(-2.35, -0.15), new THREE.Vector2(2.35, -0.15),
+    new THREE.Vector2(1.45, 2.15), new THREE.Vector2(-1.45, 2.15),
+  ]);
+  const pane = new THREE.Mesh(new THREE.ShapeGeometry(paneShape), new THREE.MeshPhysicalMaterial({
+    color: 0xcfe4f2, transparent: true, opacity: 0.1, roughness: 0.05, metalness: 0,
+    clearcoat: 1, envMap: env || null, envMapIntensity: 1.4, depthWrite: false,
+  }));
+  pane.position.set(0, 1.4, -3.6);
+  group.add(pane);
+
+  // ── canopy glass (kept: subtle specular sheen; sized to stay inside the wall) ──
   const glass = new THREE.Mesh(
-    new THREE.SphereGeometry(3.26, 40, 28, 0, Math.PI * 2, 0, Math.PI * 0.6),
+    new THREE.SphereGeometry(3.0, 40, 28, 0, Math.PI * 2, 0, Math.PI * 0.6),
     new THREE.MeshPhongMaterial({ color: 0x0a1a22, transparent: true, opacity: .08, side: THREE.BackSide, shininess: 90, specular: 0x335566, depthWrite: false })
   );
-  glass.position.set(0, 1.2, -0.8); group.add(glass);
+  glass.position.set(0, 1.2, -0.4); group.add(glass);
 
   // ── nose bulkhead + wraparound dash (generated console texture) ──
-  box(5.2, .9, .4, 0, .45, -2.0, M(T(tex.wall, 1.8, .32, 0, .1), { glow: .3 }));
+  const nose = new THREE.Mesh(uvXform(new THREE.BoxGeometry(5.2, .9, .4), 1.8, .32, 0, .1), hullPanelMat);
+  nose.position.set(0, .45, -2.0); group.add(nose);
   box(4.4, .025, .025, 0, .93, -1.79, stripAmber);           // caution strip
   // the generated art is a complete dashboard face — wrap it ONCE around the
   // curved console instead of tiling it, so it reads as the actual instrument
   // panel (its dark border blends into the cabin shadow)
-  const dashMat = M(T(tex.dash, 1, 1), { rough: .5, metal: .4, glow: .5 });
+  const dashMat = M(tex.dash, { rough: .5, metal: .4, glow: .5 });
   dashMat.side = THREE.DoubleSide;
-  const dash = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.3, 1.1, 48, 1, true, Math.PI * 1.16, Math.PI * 0.68), dashMat);
-  dash.position.set(0, .7, -0.75); group.add(dash);
-  // console deck under the nav screen — centre band of the dashboard art
-  const deckGeo = new THREE.PlaneGeometry(3.7, 1.3);
-  deckGeo.rotateX(-Math.PI / 2 + 0.5);
-  const deck = new THREE.Mesh(deckGeo, M(T(tex.dash, .55, .28, .22, .36), { rough: .55, metal: .35, glow: .45 }));
-  deck.position.set(0, .93, -0.3); group.add(deck);
-  // physical controls flanking the screen
-  const cluster = (s) => {
-    for (let a = 0; a < 3; a++) for (let b = 0; b < 2; b++)
-      box(.09, .04, .09, s * 1.15 + (a - 1) * .15, 1.02 - b * .06, -.2 - b * .17, b ? matDark : accent, -.5);
-    led(s * 1.45, 1.02, -.18); led(s * 1.45, .94, -.36);
-    const lever = new THREE.Mesh(new THREE.CylinderGeometry(.028, .028, .3, 10), metalBar);
-    lever.position.set(s * .72, 1.08, -.12); lever.rotation.x = -0.6; group.add(lever);
-    box(.08, .08, .08, s * .72, 1.21, -.24, accent);
-  };
-  cluster(-1); cluster(1);
-  box(2.06, 1.1, .04, 0, 1.07, -0.16, matDark, -0.5);        // nav screen bezel
+  // arc bows toward -z so the console wraps in FRONT of the pilot (thetaStart
+  // centred on PI); the old 1.16*PI start bowed it left, into the side console
+  // runs all the way to the deck — a shorter cylinder left a gap underneath
+  // that made the whole cabinet look like it floats
+  const dash = new THREE.Mesh(new THREE.CylinderGeometry(1.9, 2.0, 1.26, 48, 1, true, Math.PI * 0.66, Math.PI * 0.68), dashMat);
+  dash.position.set(0, .625, 0.4); group.add(dash);
+  // console top — a ring sector that closes the wraparound dash from above.
+  // (the old floating "deck" plane clipped the screen bottom and its corners
+  // stuck out past the dash as bare green wedges; the lever/button cubes that
+  // hovered over it are gone — the dash art already depicts the controls)
+  const topGeo = new THREE.RingGeometry(1.12, 2.0, 64, 1, Math.PI * 0.16, Math.PI * 0.68);
+  uvXform(topGeo, .5, .42, .25, .3);
+  topGeo.rotateX(-Math.PI / 2);                              // lie flat, arc toward -z
+  const ctop = new THREE.Mesh(topGeo, dashMat);
+  ctop.position.set(0, 1.251, 0.4); group.add(ctop);
+  // inner skirt facing the pilot, so the console reads as a solid cabinet
+  const skirtMat = new THREE.MeshStandardMaterial({ color: 0x171c22, roughness: .5, metalness: .55, side: THREE.DoubleSide, envMap: env || null, envMapIntensity: .8 });
+  const skirt = new THREE.Mesh(new THREE.CylinderGeometry(1.12, 1.23, 1.26, 48, 1, true, Math.PI * 0.66, Math.PI * 0.68), skirtMat);
+  skirt.position.set(0, .625, 0.4); group.add(skirt);
+  // glowing lip along the console's inner edge
+  const lipGeo = new THREE.TorusGeometry(1.13, .018, 10, 64, Math.PI * 0.68);
+  lipGeo.rotateZ(Math.PI * 0.16); lipGeo.rotateX(-Math.PI / 2);
+  const lip = new THREE.Mesh(lipGeo, stripTeal);
+  lip.position.set(0, 1.252, 0.4); group.add(lip);
+  // end caps — the cabinet is a hollow arc between dash (outer) and skirt
+  // (inner); without these you could see straight into it from the sides
+  [-1, 1].forEach((s) => {
+    box(.95, 1.26, .07, s * 1.367, .625, -0.352, matDark, 0, s * .503);
+  });
+
+  // monitor housing — a dark shell seated on the console top; the interactive
+  // screen plane (JSX) sits flush in its front opening
+  box(2.02, 1.06, .12, 0, 1.767, -1.119, matDark, -0.18);
+  box(.9, .05, .46, 0, 1.278, -1.05, matDark);               // foot pad
+  // grab rails flanking the monitor — seated on the console, not floating
+  [-1, 1].forEach((s) => {
+    const rail = new THREE.Mesh(new THREE.CylinderGeometry(.022, .022, .46, 12), metalBar);
+    rail.rotation.z = Math.PI / 2; rail.rotation.y = s * 0.45;
+    rail.position.set(s * 1.28, 1.36, -0.9);
+    group.add(rail);
+    box(.05, .12, .05, s * 1.46, 1.31, -.99, matDark, 0, s * .45);
+    box(.05, .12, .05, s * 1.1, 1.31, -.81, matDark, 0, s * .45);
+  });
 
   // ── side consoles with generated panel tops ──
   const side = (s) => {
     const x = s * 2.35;
-    box(1.1, .95, 3.3, x, .5, .9, M(T(tex.wall, .9, .4, .3, .35), { glow: .3 }));
+    const body = new THREE.Mesh(uvXform(new THREE.BoxGeometry(1.1, .95, 3.3), .9, .4, .3, .35), hullPanelMat);
+    body.position.set(x, .5, .9); group.add(body);
     box(1.16, .06, 3.36, x, .03, .9, matDark);               // plinth
-    const topGeo = new THREE.PlaneGeometry(1.06, 3.2);
-    topGeo.rotateX(-Math.PI / 2);
+    const sideTopGeo = new THREE.PlaneGeometry(1.06, 3.2);
     // left/right button-cluster regions of the dashboard art
-    const top = new THREE.Mesh(topGeo, M(T(tex.dash, .3, .85, s > 0 ? .67 : .03, .08), { glow: .5 }));
+    uvXform(sideTopGeo, .3, .85, s > 0 ? .67 : .03, .08);
+    sideTopGeo.rotateX(-Math.PI / 2);
+    const top = new THREE.Mesh(sideTopGeo, dashMat);
     top.position.set(x, .985, .9);
     group.add(top);
-    led(x - s * .3, 1.01, -.1); led(x - s * .3, 1.01, .7); led(x - s * .3, 1.01, 1.5);
+    // flush status light bar instead of loose LED cubes hovering over the art
+    box(.05, .006, 2.6, x - s * .42, .99, .9, stripTeal);
   };
   side(-1); side(1);
 
+  // ── faked contact shadows — gradient blobs ground every prop on the deck
+  // (real shadow maps would cost too much next to the solar scene) ──
+  const aoTex = (() => {
+    const c = document.createElement('canvas'); c.width = c.height = 256;
+    const g = c.getContext('2d');
+    const rg = g.createRadialGradient(128, 128, 10, 128, 128, 128);
+    rg.addColorStop(0, 'rgba(0,0,0,.62)'); rg.addColorStop(.55, 'rgba(0,0,0,.34)'); rg.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = rg; g.fillRect(0, 0, 256, 256);
+    return new THREE.CanvasTexture(c);
+  })();
+  const blob = (w, d, x, z) => {
+    const p = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshBasicMaterial({ map: aoTex, transparent: true, depthWrite: false }));
+    p.rotation.x = -Math.PI / 2; p.position.set(x, .012, z);
+    group.add(p);
+  };
+  blob(4.6, 2.6, 0, -0.7);                                   // main console
+  blob(1.9, 4.0, -2.35, .9); blob(1.9, 4.0, 2.35, .9);       // side consoles
+  blob(1.6, 1.7, 0, 3.55);                                   // pilot seat
+
   // cabin lighting — local to the deck so it doesn't depend on your distant sun.
-  // hemisphere gives the even ISS-style fill; ceiling point lights add pools.
-  group.add(new THREE.HemisphereLight(0xbcd0e8, 0x2a2f37, 1.3 * CABIN_LIGHT));
+  // hemisphere gives the even ISS-style fill; ceiling point lights add pools;
+  // a warm aft light against the teal console glow gives the cinematic
+  // warm/cool contrast the flat all-white rig lacked.
+  group.add(new THREE.HemisphereLight(0xbcd0e8, 0x22262e, 0.9 * CABIN_LIGHT));
+  const aft = new THREE.PointLight(0xffb46a, 7 * CABIN_LIGHT, 9, 2); aft.position.set(0, 2.4, 5.6); group.add(aft);
   [[-1.5, 3.0, 0.4], [1.5, 3.0, 0.4], [0, 3.0, 2.6], [0, 3.0, 4.8]].forEach((p) => {
     const pl = new THREE.PointLight(0xe6eeff, 23 * CABIN_LIGHT, 18, 2); pl.position.set(p[0], p[1], p[2]); group.add(pl);
   });
   const fillP = new THREE.PointLight(0x9fb8ff, 10 * CABIN_LIGHT, 16, 2); fillP.position.set(0, 1.4, 1.2); group.add(fillP);
   // teal console underglow — makes the dash read as the powered heart of the deck
-  const dashGlow = new THREE.PointLight(0x00ffcc, 5 * CABIN_LIGHT, 6, 2); dashGlow.position.set(0, 1.0, -0.4); group.add(dashGlow);
+  const dashGlow = new THREE.PointLight(0x00ffcc, 3 * CABIN_LIGHT, 5, 2); dashGlow.position.set(0, 1.7, -0.7); group.add(dashGlow);
 
   return { group, blinkers };
 }
@@ -222,9 +324,10 @@ function PilotSeat() {
     return s;
   }, [scene]);
   // wrapper group carries placement; the clone keeps its internal
-  // centre/floor-mount offsets (a position prop on <primitive> would clobber them)
+  // centre/floor-mount offsets (a position prop on <primitive> would clobber
+  // them). The GLB models the seat facing +z, so turn it to face the console.
   return (
-    <group position={[0, 0.02, 3.55]}>
+    <group position={[0, 0.02, 3.55]} rotation={[0, Math.PI, 0]}>
       <primitive object={seat} />
     </group>
   );
@@ -297,7 +400,7 @@ function DestinationHolo({ hoveredRef, navReadyRef }) {
   });
 
   return (
-    <group ref={groupRef} position={[0, 2.1, -1.15]} scale={0.0001} visible={false}>
+    <group ref={groupRef} position={[0, 2.85, -1.85]} scale={0.0001} visible={false}>
       <mesh ref={sphereRef}>
         <sphereGeometry args={[0.26, 32, 32]} />
         <primitive object={sphereMat} attach="material" />
@@ -386,37 +489,55 @@ export default function Cockpit({ posRef, onEngage }) {
     []
   );
 
-  // nav screen canvas
+  // nav screen canvas — drawn at 2x and downsampled by the GPU for crisp text
   const screen = useMemo(() => {
-    const canvas = document.createElement('canvas'); canvas.width = SCRW; canvas.height = SCRH;
+    const canvas = document.createElement('canvas'); canvas.width = SCRW * 2; canvas.height = SCRH * 2;
     const ctx = canvas.getContext('2d');
     const texture = new THREE.CanvasTexture(canvas);
+    texture.anisotropy = 8;
     const rects = navList.map((s, i) => ({ x: 16, y: 64 + i * 34, w: 392, h: 32 }));
     return { canvas, ctx, texture, rects };
   }, [navList]);
 
-  // load the generated panel textures (graceful fallback if files are missing)
+  // load the generated texture sets (color + offline-generated normal/roughness
+  // maps; graceful fallback if any file is missing)
   const [tex, setTex] = useState({ wall: null, floor: null, ceiling: null, dash: null });
   useEffect(() => {
     const loader = new THREE.TextureLoader();
-    const load = (url) => new Promise((res) => loader.load(
+    const load = (url, srgb = true) => new Promise((res) => loader.load(
       url,
-      (t) => { t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; res(t); },
+      (t) => { if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 16; res(t); },
       undefined,
       () => res(null),
     ));
+    const bundle = async (name) => {
+      const [c, n, r] = await Promise.all([
+        load(`/textures/cockpit/${name}.jpg`),
+        load(`/textures/cockpit/${name}_n.jpg`, false),   // normal/rough stay linear
+        load(`/textures/cockpit/${name}_r.jpg`, false),
+      ]);
+      return c ? { c, n, r } : null;
+    };
     let alive = true;
-    Promise.all([
-      load('/textures/cockpit/wall.jpg'),
-      load('/textures/cockpit/floor.jpg'),
-      load('/textures/cockpit/ceiling.jpg'),
-      load('/textures/cockpit/dash.jpg'),
-    ]).then(([wall, floor, ceiling, dash]) => { if (alive) setTex({ wall, floor, ceiling, dash }); });
+    Promise.all(['wall', 'floor', 'ceiling', 'dash'].map(bundle))
+      .then(([wall, floor, ceiling, dash]) => {
+        if (alive) setTex({ wall, floor, ceiling, dash });
+      });
     return () => { alive = false; };
   }, []);
 
+  // neutral studio environment map — gives the metals real reflections instead
+  // of the flat "unlit game" look (cockpit materials only; scene.environment
+  // stays untouched so the planets are unaffected)
+  const envMap = useMemo(() => {
+    const pmrem = new THREE.PMREMGenerator(gl);
+    const rt = pmrem.fromScene(new RoomEnvironment(), 0.04);
+    pmrem.dispose();
+    return rt.texture;
+  }, [gl]);
+
   // build geometry once textures resolve (rebuilds if they arrive later)
-  const built = useMemo(() => buildCockpit(tex), [tex]);
+  const built = useMemo(() => buildCockpit(tex, envMap), [tex, envMap]);
 
   // ── controller refs ──
   const yaw = useRef(DEF_YAW), pitch = useRef(DEF_PITCH), tYaw = useRef(DEF_YAW), tPitch = useRef(DEF_PITCH);
@@ -455,6 +576,16 @@ export default function Cockpit({ posRef, onEngage }) {
     return () => { el.removeEventListener('pointerdown', down); window.removeEventListener('pointerup', up); window.removeEventListener('pointermove', move); window.removeEventListener('keydown', kd); window.removeEventListener('keyup', ku); };
   }, [gl]);
 
+  // dev-only: scripts/snap.mjs aims the camera through this so visual-regression
+  // shots use fixed, reproducible angles
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    window.__snap = {
+      look: (y, p) => { yaw.current = tYaw.current = y; pitch.current = tPitch.current = p; },
+    };
+    return () => { delete window.__snap; };
+  }, []);
+
   const rowFromUv = (uv) => {
     if (!uv) return -1;
     const cx = uv.x * SCRW, cy = (1 - uv.y) * SCRH;
@@ -477,7 +608,10 @@ export default function Cockpit({ posRef, onEngage }) {
   // draw the nav screen
   const draw = (t) => {
     const { ctx } = screen;
-    ctx.clearRect(0, 0, SCRW, SCRH); ctx.fillStyle = 'rgba(4,12,16,.94)'; ctx.fillRect(0, 0, SCRW, SCRH);
+    ctx.setTransform(2, 0, 0, 2, 0, 0);   // 2x supersample, logical coords below
+    // fully opaque background — a translucent screen let the levers behind it
+    // ghost through as bars
+    ctx.clearRect(0, 0, SCRW, SCRH); ctx.fillStyle = '#040c10'; ctx.fillRect(0, 0, SCRW, SCRH);
     ctx.strokeStyle = 'rgba(0,255,204,.45)'; ctx.lineWidth = 2; ctx.strokeRect(6, 6, SCRW - 12, SCRH - 12);
     if (!navReady.current) {
       const p = enterT.current == null ? 0 : Math.min((t - enterT.current) / 1.9, 1);
@@ -490,7 +624,14 @@ export default function Cockpit({ posRef, onEngage }) {
     ctx.fillStyle = '#00ffcc'; ctx.font = '600 18px monospace'; ctx.fillText('NAV // SELECT DESTINATION', 20, 38);
     navList.forEach((s, i) => {
       const r = screen.rects[i];
-      if (i === hovered.current) { ctx.fillStyle = 'rgba(0,255,204,.16)'; ctx.fillRect(r.x, r.y, r.w, r.h); ctx.strokeStyle = 'rgba(0,255,204,.6)'; ctx.lineWidth = 1; ctx.strokeRect(r.x + .5, r.y + .5, r.w - 1, r.h - 1); }
+      if (i === hovered.current) {
+        // bright caret + gradient so the highlight reads as UI, not a glitch
+        const hg = ctx.createLinearGradient(r.x, 0, r.x + r.w, 0);
+        hg.addColorStop(0, 'rgba(0,255,204,.3)'); hg.addColorStop(1, 'rgba(0,255,204,.04)');
+        ctx.fillStyle = hg; ctx.fillRect(r.x, r.y, r.w, r.h);
+        ctx.fillStyle = '#00ffcc'; ctx.fillRect(r.x, r.y, 3, r.h);
+        ctx.strokeStyle = 'rgba(0,255,204,.9)'; ctx.lineWidth = 1; ctx.strokeRect(r.x + .5, r.y + .5, r.w - 1, r.h - 1);
+      }
       ctx.fillStyle = s.color; ctx.beginPath(); ctx.arc(r.x + 16, r.y + r.h / 2, 5, 0, 7); ctx.fill();
       ctx.fillStyle = i === hovered.current ? '#fff' : '#cfe7f5'; ctx.font = '600 14px monospace'; ctx.fillText(s.label.toUpperCase(), r.x + 34, r.y + 15);
       ctx.fillStyle = '#6f93aa'; ctx.font = '10px monospace'; ctx.fillText(s.sub, r.x + 34, r.y + 28);
@@ -598,7 +739,7 @@ export default function Cockpit({ posRef, onEngage }) {
         <Suspense fallback={null}>
           <PilotSeat />
         </Suspense>
-        <group position={[0, 1.08, -0.08]} rotation={[-0.5, 0, 0]}>
+        <group position={[0, 1.78, -1.05]} rotation={[-0.18, 0, 0]}>
           <mesh
             onPointerMove={(e) => {
               e.stopPropagation();
@@ -611,7 +752,7 @@ export default function Cockpit({ posRef, onEngage }) {
             onClick={(e) => { e.stopPropagation(); if (moved.current > 6) return; const r = rowFromUv(e.uv); if (r >= 0) startTravel(r); }}
           >
             <planeGeometry args={[1.9, 0.95]} />
-            <meshBasicMaterial map={screen.texture} transparent toneMapped={false} />
+            <meshBasicMaterial map={screen.texture} toneMapped={false} />
           </mesh>
           {/* glowing bezel frame around the nav screen */}
           {[

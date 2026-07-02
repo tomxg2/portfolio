@@ -1232,6 +1232,14 @@ function SceneContent({ onNodeSelect, onPlanetSelect, onProjectSelect, onEnterCo
 
   useEffect(() => { posRef.current['about'] = { x: 0, y: 0, z: 0 }; }, []);
 
+  // dev-only: scripts/snap.mjs pins the orbit camera through this so solar-view
+  // snapshots don't depend on how far auto-rotate drifted during page load
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    window.__orbit = orbitRef;
+    return () => { delete window.__orbit; };
+  }, []);
+
   // Auto-rotate idle behavior: pause on interaction, resume after 5s idle.
   useEffect(() => {
     const controls = orbitRef.current;
@@ -1359,6 +1367,9 @@ export default function Scene3D({ onNodeSelect, onPlanetSelect, onProjectSelect,
   );
   // Sun mesh ref lifted up so the GodRays effect can target it.
   const [sunMesh, setSunMesh] = useState(null);
+  // God rays are an exterior effect: inside the cockpit their screen-space
+  // streaks smear across the dashboard monitor, so they only run in solar mode.
+  const shipMode = useShipStore((s) => s.mode);
   useEffect(() => {
     const onVis = () => setVisible(!document.hidden);
     document.addEventListener('visibilitychange', onVis);
@@ -1404,7 +1415,7 @@ export default function Scene3D({ onNodeSelect, onPlanetSelect, onProjectSelect,
           {/* Postprocessing: bloom + god rays. Skipped on mobile. */}
           {!IS_MOBILE && (
             <EffectComposer disableNormalPass multisampling={0}>
-              {sunMesh && (
+              {sunMesh && shipMode === 'solar' && (
                 <GodRays
                   sun={sunMesh}
                   blendFunction={BlendFunction.SCREEN}
