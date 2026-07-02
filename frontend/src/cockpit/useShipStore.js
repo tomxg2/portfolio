@@ -13,3 +13,6 @@ export const useShipStore = create((set) => ({
   enterCockpit: () => set({ mode: 'cockpit' }),
   exitCockpit: () => set({ mode: 'solar' }),
 }));
+
+// dev-only: lets scripts/snap.mjs drive mode changes from Playwright
+if (import.meta.env.DEV) window.__ship = useShipStore;

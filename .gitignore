@@ -42,5 +42,8 @@ pnpm-debug.log*
 *.swo
 *~
 
+# Visual-regression screenshots (local tooling, see frontend/scripts/snap.mjs)
+frontend/scripts/snapshots/
+
 # Claude Code local state
 .claude/
