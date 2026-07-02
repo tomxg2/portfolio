@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
+import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { NODES } from '../data/nodes.js';
 import { useShipStore } from './useShipStore.js';
@@ -44,120 +45,152 @@ const hits = (x, z) => OBST.some((o) => x > o.x0 - PR && x < o.x1 + PR && z > o.
 const SCRW = 640, SCRH = 320;
 
 /* ---- imperative geometry build (local coords; mounted under a positioned group) ---- */
+// Interior v2 — an octagonal hull tube dressed in AI-generated panel textures
+// (Higgsfield: wall / floor / ceiling / dashboard). The pilot seat is a
+// generated GLB mounted separately in JSX (<PilotSeat/>). Footprint, seat
+// position, collision bounds and the nav screen transform are unchanged.
 function buildCockpit(tex) {
   const group = new THREE.Group();
   const blinkers = [];
-  const ledColors = [0x4ade80, 0x4ade80, 0x00ffcc, 0x60a5fa, 0xffb454, 0xff5a5a];
 
-  const hullMap = tex.hull || null, eqMap = tex.equipment || null, scrMap = tex.screen || null;
-  const matHull = new THREE.MeshStandardMaterial({ color: 0x3c4651, map: hullMap, roughness: .62, metalness: .35 });
-  const matFloor = new THREE.MeshStandardMaterial({ color: 0x2c333d, map: hullMap, roughness: .7, metalness: .4 });
-  const panelL = new THREE.MeshStandardMaterial({ color: hullMap ? 0xffffff : 0xbcc6d0, map: hullMap, roughness: .6, metalness: .22 });
-  const panelM = new THREE.MeshStandardMaterial({ color: 0x808b97, roughness: .68, metalness: .2 });
-  const recess = new THREE.MeshStandardMaterial({ color: 0x232932, roughness: .85, metalness: .2 });
-  const accent = new THREE.MeshStandardMaterial({ color: 0x2fae9a, roughness: .5, metalness: .3, emissive: 0x00ffcc, emissiveIntensity: 0.35 });
-  const stripTeal = new THREE.MeshBasicMaterial({ color: 0x59ffdd, toneMapped: false });
-  const stripAmber = new THREE.MeshBasicMaterial({ color: 0xffb454, toneMapped: false });
-  const metalBar = new THREE.MeshStandardMaterial({ color: 0xacb6c0, roughness: .3, metalness: .85 });
-  const matDark = new THREE.MeshStandardMaterial({ color: 0x171c22, roughness: .7, metalness: .4 });
-  const matSeat = new THREE.MeshStandardMaterial({ color: 0x2c343e, roughness: .8, metalness: .25 });
-  const eqMat = new THREE.MeshStandardMaterial({ color: eqMap ? 0xffffff : 0x6f7a86, map: eqMap, roughness: .55, metalness: .35 });
-  const fixtureM = new THREE.MeshBasicMaterial({ color: 0xeaf2ff, toneMapped: false });
+  // clone-with-repeat so one loaded texture can wrap several surfaces
+  const T = (t, rx, ry, ox = 0, oy = 0) => {
+    if (!t) return null;
+    const c = t.clone();
+    c.wrapS = c.wrapT = THREE.RepeatWrapping;
+    c.repeat.set(rx, ry);
+    c.offset.set(ox, oy);
+    c.needsUpdate = true;
+    return c;
+  };
+  // panel material with a soft self-illumination floor (same emissiveMap trick
+  // as the planets) so the generated art reads regardless of light tuning
+  const M = (map, { rough = .62, metal = .3, glow = .3, fallback = 0x39424d } = {}) => {
+    const m = new THREE.MeshStandardMaterial({ color: map ? 0xffffff : fallback, map, roughness: rough, metalness: metal });
+    if (map) { m.emissiveMap = map; m.emissive = new THREE.Color(0xffffff); m.emissiveIntensity = glow; }
+    else { m.emissive = new THREE.Color(fallback); m.emissiveIntensity = 0.12; }
+    return m;
+  };
   const LM = (c) => new THREE.MeshBasicMaterial({ color: c, toneMapped: false });
-  const screenSmall = () => new THREE.MeshBasicMaterial({ color: scrMap ? 0xffffff : 0x0b1a26, map: scrMap, toneMapped: false });
-  // soft self-illumination floor so panels stay readable regardless of light tuning
-  [matHull, matFloor, panelL, panelM, eqMat].forEach((m) => { m.emissive = new THREE.Color(m.color.getHex()); m.emissiveIntensity = 0.12; });
+  const matDark = new THREE.MeshStandardMaterial({ color: 0x171c22, roughness: .7, metalness: .4 });
+  const metalBar = new THREE.MeshStandardMaterial({ color: 0xacb6c0, roughness: .3, metalness: .85 });
+  const accent = new THREE.MeshStandardMaterial({ color: 0x2fae9a, roughness: .5, metalness: .3, emissive: 0x00ffcc, emissiveIntensity: 0.35 });
+  const stripTeal = LM(0x59ffdd);
+  const stripAmber = LM(0xffb454);
 
-  const box = (g, w, h, d, x, y, z, mat, rx, ry, rz) => {
+  const box = (w, h, d, x, y, z, mat, rx, ry, rz) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
     m.position.set(x, y, z); if (rx) m.rotation.x = rx; if (ry) m.rotation.y = ry; if (rz) m.rotation.z = rz;
-    g.add(m); return m;
+    group.add(m); return m;
   };
-  const led = (g, x, y, z) => {
-    const c = ledColors[(Math.random() * ledColors.length) | 0];
-    const m = new THREE.Mesh(new THREE.BoxGeometry(.04, .04, .03), LM(c));
-    m.position.set(x, y, z + .012); g.add(m);
-    if (Math.random() < .4) blinkers.push({ m, o: Math.random() * 6 });
-  };
-  const greeble = (cx, cy, cz, W, H, rotY, rotX, opts = {}) => {
-    const g = new THREE.Group(); g.position.set(cx, cy, cz); if (rotY) g.rotation.y = rotY; if (rotX) g.rotation.x = rotX; group.add(g);
-    box(g, W, H, .08, 0, 0, 0, recess);
-    const cols = opts.cols || Math.max(3, Math.round(W / 1.25)), rows = opts.rows || Math.max(2, Math.round(H / .92));
-    const cw = W / cols, ch = H / rows, fz = .10;
-    for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
-      const x = -W / 2 + cw * (i + .5), y = -H / 2 + ch * (j + .5), pw = cw * .88, ph = ch * .86;
-      box(g, pw, ph, .05 + Math.random() * .04, x, y, .05, Math.random() < .35 ? eqMat : (Math.random() < .6 ? panelL : panelM));
-      const r = Math.random();
-      if (r < .16) { box(g, pw * .74, ph * .5, .02, x, y + ph * .03, fz, screenSmall()); box(g, pw * .78, .014, .012, x, y + ph * .27, fz, accent); led(g, x - pw * .3, y - ph * .27, fz); }
-      else if (r < .42) { for (let a = 0; a < 4; a++) for (let b = 0; b < 2; b++) box(g, pw * .12, ph * .13, .03, x - pw * .28 + a * pw * .19, y - ph * .13 + b * ph * .24, fz, panelM); led(g, x + pw * .32, y + ph * .27, fz); led(g, x + pw * .32, y + ph * .04, fz); }
-      else if (r < .57) { const ring = new THREE.Mesh(new THREE.TorusGeometry(Math.min(pw, ph) * .3, .018, 8, 20), accent); ring.position.set(x, y, fz); g.add(ring); led(g, x, y, fz); }
-      else if (r < .71) { for (let a = 0; a < 4; a++) box(g, pw * .72, ph * .05, .02, x, y - ph * .24 + a * ph * .14, fz, recess); }
-      else if (r < .82) { box(g, pw * .82, ph * .72, .16, x, y, .14, panelL); box(g, pw * .32, .045, .05, x, y, .24, metalBar); led(g, x + pw * .3, y + ph * .28, .18); }
-      if (Math.random() < .14) box(g, pw * .9, .016, .012, x, y - ph * .43, fz, accent);
-    }
-    box(g, W * .93, .1, .1, 0, -H * .46, .12, matDark);
-    if (opts.rail) {
-      const bar = new THREE.Mesh(new THREE.CylinderGeometry(.035, .035, W * .84, 12), metalBar); bar.rotation.z = Math.PI / 2; bar.position.set(0, -H * .17, .24); g.add(bar);
-      for (let k = -1; k <= 1; k += 2) { const sb = new THREE.Mesh(new THREE.CylinderGeometry(.02, .02, .2, 8), metalBar); sb.position.set(k * W * .3, -H * .17, .14); sb.rotation.x = Math.PI / 2; g.add(sb); }
-    }
+  const ledColors = [0x4ade80, 0x00ffcc, 0x60a5fa, 0xffb454, 0xff5a5a];
+  const led = (x, y, z) => {
+    const m = box(.05, .05, .03, x, y, z, LM(ledColors[(Math.random() * ledColors.length) | 0]));
+    if (Math.random() < .5) blinkers.push({ m, o: Math.random() * 6 });
+    return m;
   };
 
-  // floor + seams
-  box(group, 6, .1, 10, 0, -.05, 1.7, matFloor);
-  for (let i = 0; i < 5; i++) box(group, 5.6, .02, .05, 0, .005, -2.2 + i * 1.9, recess);
-  box(group, .1, .06, 9.4, -2.2, .02, 1.7, matDark); box(group, .1, .06, 9.4, 2.2, .02, 1.7, matDark);
-  // glowing floor edge strips — lead the eye toward the dash, feed the bloom pass
-  box(group, .035, .015, 9.0, -2.06, .06, 1.7, stripTeal); box(group, .035, .015, 9.0, 2.06, .06, 1.7, stripTeal);
-  // shell
-  box(group, 6, 3.4, .2, 0, 1.6, 6.7, matHull);
-  box(group, .2, 3.4, 10, -3.0, 1.6, 1.7, matHull); box(group, .2, 3.4, 10, 3.0, 1.6, 1.7, matHull);
-  box(group, 6, .2, 7.2, 0, 3.35, 2.4, matHull);
-  // greebled walls
-  greeble(0, 1.55, 6.55, 5.4, 3.0, Math.PI, 0, { rail: true });
-  greeble(-2.85, 1.55, 2.2, 8.2, 3.0, Math.PI / 2, 0, { rail: true });
-  greeble(2.85, 1.55, 2.2, 8.2, 3.0, -Math.PI / 2, 0, { rail: true });
-  greeble(0, 3.22, 2.6, 5.2, 6.6, 0, Math.PI / 2, { cols: 4, rows: 6 });
-  // ceiling light fixtures
-  [[-1.5, 0.4], [1.5, 0.4], [0, 2.6], [0, 4.8]].forEach((p) => box(group, 1.5, .06, .55, p[0], 3.24, p[1], fixtureM));
-  // side consoles
-  const side = (s) => {
-    const x = s * 2.4;
-    box(group, 1.0, 1.05, 3.4, x, .55, .7, matHull);
-    box(group, 1.04, .08, 3.44, x, 1.07, .7, panelM);
-    const top = new THREE.Group(); top.position.set(x, 1.12, .7); top.rotation.x = -0.18; group.add(top);
-    for (let i = 0; i < 5; i++) { box(top, .18, .1, .18, -s * .18, 0, -1.1 + i * .5, panelL); led(top, s * .1, 0, -1.1 + i * .5); }
-    box(top, .5, .32, .02, s * .05, .02, 1.0, screenSmall());
-  };
-  side(-1); side(1);
-  // canopy glass only — ribs/band removed (they read as "gates" obstructing the view,
-  // and the torus bottoms curved down behind the seat causing back-cabin clutter).
-  const glass = new THREE.Mesh(new THREE.SphereGeometry(3.26, 40, 28, 0, Math.PI * 2, 0, Math.PI * 0.6), new THREE.MeshPhongMaterial({ color: 0x0a1a22, transparent: true, opacity: .08, side: THREE.BackSide, shininess: 90, specular: 0x335566, depthWrite: false })); glass.position.set(0, 1.2, -0.8); group.add(glass);
-  // nose bulkhead + dashboard
-  box(group, 5.2, .9, .4, 0, .45, -2.0, matHull);
-  greeble(0, .55, -1.95, 4.4, .8, 0, 0, { cols: 5, rows: 1 });
-  // amber caution strip across the bulkhead lip
-  box(group, 4.4, .025, .025, 0, .93, -1.79, stripAmber);
-  const dash = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 1.15, 48, 1, true, Math.PI * 1.16, Math.PI * 0.68), new THREE.MeshStandardMaterial({ color: 0x39424d, roughness: .55, metalness: .5, side: THREE.DoubleSide })); dash.position.set(0, .7, -0.75); group.add(dash);
+  // ── hull: octagonal tube along z, flat facets at floor / walls / ceiling ──
+  const hullMat = M(T(tex.wall, 4, 1.6), { rough: .72, metal: .28, glow: .27 });
+  hullMat.side = THREE.BackSide;
+  const tubeGeo = new THREE.CylinderGeometry(3.2, 3.2, 10.4, 8, 1, true);
+  tubeGeo.rotateY(Math.PI / 8);   // facet centres to 0/45/90°…
+  tubeGeo.rotateX(Math.PI / 2);   // axis along z
+  const tube = new THREE.Mesh(tubeGeo, hullMat);
+  tube.position.set(0, 1.4, 1.5);
+  group.add(tube);
+  // glowing seams along the upper facet corners
+  box(.03, .03, 9.8, -1.22, 4.32, 1.5, stripTeal, 0, 0, Math.PI / 4);
+  box(.03, .03, 9.8, 1.22, 4.32, 1.5, stripTeal, 0, 0, -Math.PI / 4);
+
+  // ── rear cap + airlock — same wall panelling as the tube for cohesion
+  // (the bright light-panel "ceiling" art overpowered the cabin; it now only
+  // dresses the ceiling troughs' surround below)
+  const capGeo = new THREE.CircleGeometry(3.2, 8);
+  capGeo.rotateZ(Math.PI / 8);
+  const cap = new THREE.Mesh(capGeo, M(T(tex.wall, 1.8, 1.8), { glow: .28 }));
+  cap.position.set(0, 1.4, 6.68); cap.rotation.y = Math.PI;
+  group.add(cap);
+  box(1.5, 2.3, .08, 0, 1.15, 6.6, matDark);                 // airlock slab
+  box(1.66, .05, .1, 0, 2.32, 6.58, stripTeal);              // glowing frame
+  box(.05, 2.36, .1, -.85, 1.15, 6.58, stripTeal);
+  box(.05, 2.36, .1, .85, 1.15, 6.58, stripTeal);
+  box(.34, .12, .06, .52, 1.62, 6.54, accent); led(.52, 1.4, 6.54); // door panel
+
+  // ── floor: generated deck plating + glowing centre walkway to the dash ──
+  const floorGeo = new THREE.PlaneGeometry(6.2, 10.4);
+  floorGeo.rotateX(-Math.PI / 2);
+  const floor = new THREE.Mesh(floorGeo, M(T(tex.floor, 2, 3.4), { rough: .8, metal: .3, glow: .26 }));
+  floor.position.set(0, 0, 1.5);
+  group.add(floor);
+  box(.04, .02, 9.4, -.55, .015, 1.5, stripTeal);
+  box(.04, .02, 9.4, .55, .015, 1.5, stripTeal);
+
+  // ── ceiling: generated light-panel art on the top facet + physical troughs ──
+  const ceilGeo = new THREE.PlaneGeometry(2.4, 9.8);
+  ceilGeo.rotateX(Math.PI / 2);                              // face down
+  const ceil = new THREE.Mesh(ceilGeo, M(T(tex.ceiling, 1, 3.2), { glow: .3 }));
+  ceil.position.set(0, 4.35, 1.5);
+  group.add(ceil);
+  [-0.85, 0.85].forEach((x) => {
+    box(.55, .05, 7.6, x, 4.33, 1.6, matDark);               // recess frame
+    box(.45, .05, 7.4, x, 4.3, 1.6, LM(0xeaf2ff));           // diffuser
+  });
+
+  // ── canopy glass (kept: ribs read as obstructions per earlier feedback) ──
+  const glass = new THREE.Mesh(
+    new THREE.SphereGeometry(3.26, 40, 28, 0, Math.PI * 2, 0, Math.PI * 0.6),
+    new THREE.MeshPhongMaterial({ color: 0x0a1a22, transparent: true, opacity: .08, side: THREE.BackSide, shininess: 90, specular: 0x335566, depthWrite: false })
+  );
+  glass.position.set(0, 1.2, -0.8); group.add(glass);
+
+  // ── nose bulkhead + wraparound dash (generated console texture) ──
+  box(5.2, .9, .4, 0, .45, -2.0, M(T(tex.wall, 1.8, .32, 0, .1), { glow: .3 }));
+  box(4.4, .025, .025, 0, .93, -1.79, stripAmber);           // caution strip
+  // the generated art is a complete dashboard face — wrap it ONCE around the
+  // curved console instead of tiling it, so it reads as the actual instrument
+  // panel (its dark border blends into the cabin shadow)
+  const dashMat = M(T(tex.dash, 1, 1), { rough: .5, metal: .4, glow: .5 });
+  dashMat.side = THREE.DoubleSide;
+  const dash = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.3, 1.1, 48, 1, true, Math.PI * 1.16, Math.PI * 0.68), dashMat);
+  dash.position.set(0, .7, -0.75); group.add(dash);
+  // console deck under the nav screen — centre band of the dashboard art
+  const deckGeo = new THREE.PlaneGeometry(3.7, 1.3);
+  deckGeo.rotateX(-Math.PI / 2 + 0.5);
+  const deck = new THREE.Mesh(deckGeo, M(T(tex.dash, .55, .28, .22, .36), { rough: .55, metal: .35, glow: .45 }));
+  deck.position.set(0, .93, -0.3); group.add(deck);
+  // physical controls flanking the screen
   const cluster = (s) => {
-    const gx = s * 1.05;
-    for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) box(group, .08, .05, .08, gx - s * .12 + a * s * .12, .9 - b * .12, -.35, panelM);
-    led(group, gx, .95, -.32); led(group, gx, .7, -.32);
-    const lever = new THREE.Mesh(new THREE.CylinderGeometry(.03, .03, .28, 8), metalBar); lever.position.set(s * .55, .95, -.05); lever.rotation.x = -0.5; group.add(lever);
-    box(group, .09, .09, .09, s * .55, 1.08, -.18, accent);
+    for (let a = 0; a < 3; a++) for (let b = 0; b < 2; b++)
+      box(.09, .04, .09, s * 1.15 + (a - 1) * .15, 1.02 - b * .06, -.2 - b * .17, b ? matDark : accent, -.5);
+    led(s * 1.45, 1.02, -.18); led(s * 1.45, .94, -.36);
+    const lever = new THREE.Mesh(new THREE.CylinderGeometry(.028, .028, .3, 10), metalBar);
+    lever.position.set(s * .72, 1.08, -.12); lever.rotation.x = -0.6; group.add(lever);
+    box(.08, .08, .08, s * .72, 1.21, -.24, accent);
   };
   cluster(-1); cluster(1);
-  box(group, 2.06, 1.1, .04, 0, 1.07, -0.16, matDark, -0.5); // screen bezel
-  // seat
-  box(group, 1.0, .18, 1.0, 0, .62, 3.55, matSeat); box(group, 1.0, 1.3, .16, 0, 1.32, 4.0, matSeat); box(group, .58, .34, .16, 0, 2.02, 3.96, matSeat);
-  box(group, .16, .5, .85, -.6, .9, 3.55, matSeat); box(group, .16, .5, .85, .6, .9, 3.55, matSeat); box(group, .34, .62, .34, 0, .3, 3.55, matDark);
-  box(group, .9, .04, .9, 0, .72, 3.55, accent); led(group, .5, 1.0, 3.62);
-  box(group, .5, .018, .02, 0, 2.2, 3.9, stripTeal); // headrest glow line
+  box(2.06, 1.1, .04, 0, 1.07, -0.16, matDark, -0.5);        // nav screen bezel
+
+  // ── side consoles with generated panel tops ──
+  const side = (s) => {
+    const x = s * 2.35;
+    box(1.1, .95, 3.3, x, .5, .9, M(T(tex.wall, .9, .4, .3, .35), { glow: .3 }));
+    box(1.16, .06, 3.36, x, .03, .9, matDark);               // plinth
+    const topGeo = new THREE.PlaneGeometry(1.06, 3.2);
+    topGeo.rotateX(-Math.PI / 2);
+    // left/right button-cluster regions of the dashboard art
+    const top = new THREE.Mesh(topGeo, M(T(tex.dash, .3, .85, s > 0 ? .67 : .03, .08), { glow: .5 }));
+    top.position.set(x, .985, .9);
+    group.add(top);
+    led(x - s * .3, 1.01, -.1); led(x - s * .3, 1.01, .7); led(x - s * .3, 1.01, 1.5);
+  };
+  side(-1); side(1);
 
   // cabin lighting — local to the deck so it doesn't depend on your distant sun.
   // hemisphere gives the even ISS-style fill; ceiling point lights add pools.
   group.add(new THREE.HemisphereLight(0xbcd0e8, 0x2a2f37, 1.3 * CABIN_LIGHT));
   [[-1.5, 3.0, 0.4], [1.5, 3.0, 0.4], [0, 3.0, 2.6], [0, 3.0, 4.8]].forEach((p) => {
-    const pl = new THREE.PointLight(0xe6eeff, 30 * CABIN_LIGHT, 18, 2); pl.position.set(p[0], p[1], p[2]); group.add(pl);
+    const pl = new THREE.PointLight(0xe6eeff, 23 * CABIN_LIGHT, 18, 2); pl.position.set(p[0], p[1], p[2]); group.add(pl);
   });
   const fillP = new THREE.PointLight(0x9fb8ff, 10 * CABIN_LIGHT, 16, 2); fillP.position.set(0, 1.4, 1.2); group.add(fillP);
   // teal console underglow — makes the dash read as the powered heart of the deck
@@ -165,6 +198,38 @@ function buildCockpit(tex) {
 
   return { group, blinkers };
 }
+
+/* ---- pilot seat — Higgsfield-generated GLB, normalized and floor-mounted ---- */
+const SEAT_URL = '/models/pilot_seat.glb';
+
+function PilotSeat() {
+  const { scene } = useGLTF(SEAT_URL);
+  const seat = useMemo(() => {
+    const s = scene.clone(true);
+    const bounds = new THREE.Box3().setFromObject(s);
+    const size = bounds.getSize(new THREE.Vector3());
+    const scale = 1.6 / size.y;                       // ~1.6 units tall
+    s.scale.setScalar(scale);
+    const c = bounds.getCenter(new THREE.Vector3()).multiplyScalar(scale);
+    s.position.set(-c.x, -bounds.min.y * scale, -c.z); // centre, feet on floor
+    s.traverse((o) => {
+      if (o.isMesh && o.material?.map) {
+        o.material.emissiveMap = o.material.map;
+        o.material.emissive = new THREE.Color(0xffffff);
+        o.material.emissiveIntensity = 0.16; // readable in cabin shadow
+      }
+    });
+    return s;
+  }, [scene]);
+  // wrapper group carries placement; the clone keeps its internal
+  // centre/floor-mount offsets (a position prop on <primitive> would clobber them)
+  return (
+    <group position={[0, 0.02, 3.55]}>
+      <primitive object={seat} />
+    </group>
+  );
+}
+useGLTF.preload(SEAT_URL);
 
 /* ---- destination hologram — cyan planet preview above the dash on row hover ---- */
 const HOLO_COLOR = '#7dfff0';
@@ -330,8 +395,8 @@ export default function Cockpit({ posRef, onEngage }) {
     return { canvas, ctx, texture, rects };
   }, [navList]);
 
-  // load panel textures (graceful fallback if files are missing)
-  const [tex, setTex] = useState({ hull: null, equipment: null, screen: null });
+  // load the generated panel textures (graceful fallback if files are missing)
+  const [tex, setTex] = useState({ wall: null, floor: null, ceiling: null, dash: null });
   useEffect(() => {
     const loader = new THREE.TextureLoader();
     const load = (url) => new Promise((res) => loader.load(
@@ -342,10 +407,11 @@ export default function Cockpit({ posRef, onEngage }) {
     ));
     let alive = true;
     Promise.all([
-      load('/textures/cockpit/hull.png'),
-      load('/textures/cockpit/equipment.png'),
-      load('/textures/cockpit/screen.png'),
-    ]).then(([hull, equipment, screen]) => { if (alive) setTex({ hull, equipment, screen }); });
+      load('/textures/cockpit/wall.jpg'),
+      load('/textures/cockpit/floor.jpg'),
+      load('/textures/cockpit/ceiling.jpg'),
+      load('/textures/cockpit/dash.jpg'),
+    ]).then(([wall, floor, ceiling, dash]) => { if (alive) setTex({ wall, floor, ceiling, dash }); });
     return () => { alive = false; };
   }, []);
 
@@ -379,7 +445,8 @@ export default function Cockpit({ posRef, onEngage }) {
       moved.current += Math.abs(dx) + Math.abs(dy);
       tYaw.current += dx * 0.0026; tPitch.current -= dy * 0.0024;
       tPitch.current = Math.max(-0.9, Math.min(0.9, tPitch.current));
-      tYaw.current = Math.max(-2.6, Math.min(2.6, tYaw.current));
+      // ±175° — enough to turn around and admire the seat + airlock
+      tYaw.current = Math.max(-3.05, Math.min(3.05, tYaw.current));
     };
     const kd = (e) => { keys.current[e.key.toLowerCase()] = true; };
     const ku = (e) => { keys.current[e.key.toLowerCase()] = false; };
@@ -528,6 +595,9 @@ export default function Cockpit({ posRef, onEngage }) {
     <>
       <group ref={groupRef} position={COCKPIT_POS}>
         <primitive object={built.group} />
+        <Suspense fallback={null}>
+          <PilotSeat />
+        </Suspense>
         <group position={[0, 1.08, -0.08]} rotation={[-0.5, 0, 0]}>
           <mesh
             onPointerMove={(e) => {

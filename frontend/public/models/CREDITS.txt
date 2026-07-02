@@ -1,2 +1,5 @@
 player_ship.glb — "Spaceship" by Quaternius, via poly.pizza (https://poly.pizza/m/uCeLfsdmNP)
 License: CC0 1.0 (public domain) — https://creativecommons.org/publicdomain/zero/1.0/
+
+pilot_seat.glb — generated with Higgsfield (Meshy image-to-3D) from an AI-generated seat design, owned by Tom Hiestand.
+cockpit panel textures (textures/cockpit/*.jpg) — generated with Higgsfield (Nano Banana Pro).
