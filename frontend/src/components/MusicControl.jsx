@@ -9,7 +9,6 @@ import { Volume2, VolumeX } from 'lucide-react';
 // progression every ~8 bars so the music breathes instead of looping.
 export default function MusicControl({ focusedCategory }) {
   const [enabled, setEnabled] = useState(false);
-  const [ready, setReady]     = useState(false);
   const refs = useRef({ Tone: null, synth: null, reverb: null, filter: null, loop: null });
   const focusedRef = useRef(focusedCategory);
 
@@ -24,8 +23,11 @@ export default function MusicControl({ focusedCategory }) {
       const Tone = await import('tone');
       if (cancelled) return;
       await Tone.start();
-      // Build the graph: Synth → filter → reverb → master
-      const reverb = new Tone.Reverb({ decay: 8, wet: 0.55 }).toDestination();
+      // Build the graph: Synth → filter → reverb → own master gain.
+      // The gain node (not Tone.Destination) handles mute, so other audio
+      // systems (ship sounds run on a separate AudioContext) stay untouched.
+      const master = new Tone.Gain(1).toDestination();
+      const reverb = new Tone.Reverb({ decay: 8, wet: 0.55 }).connect(master);
       const filter = new Tone.Filter(820, 'lowpass').connect(reverb);
       filter.Q.value = 0.6;
       const synth = new Tone.PolySynth(Tone.AmSynth, {
@@ -59,17 +61,16 @@ export default function MusicControl({ focusedCategory }) {
       Tone.Transport.bpm.value = 56;
       Tone.Transport.start();
 
-      refs.current = { Tone, synth, reverb, filter, loop };
-      setReady(true);
+      refs.current = { Tone, synth, reverb, filter, loop, master };
     })();
     return () => { cancelled = true; };
   }, [enabled]);
 
-  // Master gain ramp on toggle
+  // Own-graph gain ramp on toggle — never touches the global destination
   useEffect(() => {
-    const { Tone } = refs.current;
-    if (!Tone) return;
-    Tone.Destination.volume.rampTo(enabled ? 0 : -80, 0.6);
+    const { master } = refs.current;
+    if (!master) return;
+    master.gain.rampTo(enabled ? 1 : 0, 0.6);
   }, [enabled]);
 
   return (

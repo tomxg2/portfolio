@@ -3,6 +3,8 @@ import { useThree, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { NODES } from '../data/nodes.js';
 import { useShipStore } from './useShipStore.js';
+import { startHum, stopHum, warpWhoosh, hoverBlip, engageBeep, arrivalChime } from './shipAudio.js';
+import { REAL_PLANET_TEXTURES, SUN_URL, loadCachedTexture } from '../lib/planetTextures.js';
 
 /* =============================================================================
    Cockpit.jsx — explorable flight-deck mounted inside the existing Scene3D.
@@ -27,7 +29,6 @@ const CABIN_LIGHT = 1.0;                            // master cabin brightness �
 const OX = COCKPIT_POS.x, OY = COCKPIT_POS.y, OZ = COCKPIT_POS.z;
 
 const SEAT = new THREE.Vector3(OX + 0, OY + 1.9, OZ + 2.9);
-const VIEW = new THREE.Vector3(OX + 0, OY + 1.62, OZ + 0.7);
 const _dir0 = LOOK_AT.clone().sub(SEAT).normalize();
 const DEF_YAW = Math.atan2(_dir0.x, -_dir0.z);
 const DEF_PITCH = Math.asin(Math.max(-1, Math.min(1, _dir0.y)));
@@ -54,11 +55,12 @@ function buildCockpit(tex) {
   const panelL = new THREE.MeshStandardMaterial({ color: hullMap ? 0xffffff : 0xbcc6d0, map: hullMap, roughness: .6, metalness: .22 });
   const panelM = new THREE.MeshStandardMaterial({ color: 0x808b97, roughness: .68, metalness: .2 });
   const recess = new THREE.MeshStandardMaterial({ color: 0x232932, roughness: .85, metalness: .2 });
-  const accent = new THREE.MeshStandardMaterial({ color: 0x2fae9a, roughness: .5, metalness: .3 });
+  const accent = new THREE.MeshStandardMaterial({ color: 0x2fae9a, roughness: .5, metalness: .3, emissive: 0x00ffcc, emissiveIntensity: 0.35 });
+  const stripTeal = new THREE.MeshBasicMaterial({ color: 0x59ffdd, toneMapped: false });
+  const stripAmber = new THREE.MeshBasicMaterial({ color: 0xffb454, toneMapped: false });
   const metalBar = new THREE.MeshStandardMaterial({ color: 0xacb6c0, roughness: .3, metalness: .85 });
   const matDark = new THREE.MeshStandardMaterial({ color: 0x171c22, roughness: .7, metalness: .4 });
   const matSeat = new THREE.MeshStandardMaterial({ color: 0x2c343e, roughness: .8, metalness: .25 });
-  const ribMat = new THREE.MeshStandardMaterial({ color: 0x6d7884, roughness: .35, metalness: .85 });
   const eqMat = new THREE.MeshStandardMaterial({ color: eqMap ? 0xffffff : 0x6f7a86, map: eqMap, roughness: .55, metalness: .35 });
   const fixtureM = new THREE.MeshBasicMaterial({ color: 0xeaf2ff, toneMapped: false });
   const LM = (c) => new THREE.MeshBasicMaterial({ color: c, toneMapped: false });
@@ -104,6 +106,8 @@ function buildCockpit(tex) {
   box(group, 6, .1, 10, 0, -.05, 1.7, matFloor);
   for (let i = 0; i < 5; i++) box(group, 5.6, .02, .05, 0, .005, -2.2 + i * 1.9, recess);
   box(group, .1, .06, 9.4, -2.2, .02, 1.7, matDark); box(group, .1, .06, 9.4, 2.2, .02, 1.7, matDark);
+  // glowing floor edge strips — lead the eye toward the dash, feed the bloom pass
+  box(group, .035, .015, 9.0, -2.06, .06, 1.7, stripTeal); box(group, .035, .015, 9.0, 2.06, .06, 1.7, stripTeal);
   // shell
   box(group, 6, 3.4, .2, 0, 1.6, 6.7, matHull);
   box(group, .2, 3.4, 10, -3.0, 1.6, 1.7, matHull); box(group, .2, 3.4, 10, 3.0, 1.6, 1.7, matHull);
@@ -131,6 +135,8 @@ function buildCockpit(tex) {
   // nose bulkhead + dashboard
   box(group, 5.2, .9, .4, 0, .45, -2.0, matHull);
   greeble(0, .55, -1.95, 4.4, .8, 0, 0, { cols: 5, rows: 1 });
+  // amber caution strip across the bulkhead lip
+  box(group, 4.4, .025, .025, 0, .93, -1.79, stripAmber);
   const dash = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 1.15, 48, 1, true, Math.PI * 1.16, Math.PI * 0.68), new THREE.MeshStandardMaterial({ color: 0x39424d, roughness: .55, metalness: .5, side: THREE.DoubleSide })); dash.position.set(0, .7, -0.75); group.add(dash);
   const cluster = (s) => {
     const gx = s * 1.05;
@@ -145,6 +151,7 @@ function buildCockpit(tex) {
   box(group, 1.0, .18, 1.0, 0, .62, 3.55, matSeat); box(group, 1.0, 1.3, .16, 0, 1.32, 4.0, matSeat); box(group, .58, .34, .16, 0, 2.02, 3.96, matSeat);
   box(group, .16, .5, .85, -.6, .9, 3.55, matSeat); box(group, .16, .5, .85, .6, .9, 3.55, matSeat); box(group, .34, .62, .34, 0, .3, 3.55, matDark);
   box(group, .9, .04, .9, 0, .72, 3.55, accent); led(group, .5, 1.0, 3.62);
+  box(group, .5, .018, .02, 0, 2.2, 3.9, stripTeal); // headrest glow line
 
   // cabin lighting — local to the deck so it doesn't depend on your distant sun.
   // hemisphere gives the even ISS-style fill; ceiling point lights add pools.
@@ -153,8 +160,154 @@ function buildCockpit(tex) {
     const pl = new THREE.PointLight(0xe6eeff, 30 * CABIN_LIGHT, 18, 2); pl.position.set(p[0], p[1], p[2]); group.add(pl);
   });
   const fillP = new THREE.PointLight(0x9fb8ff, 10 * CABIN_LIGHT, 16, 2); fillP.position.set(0, 1.4, 1.2); group.add(fillP);
+  // teal console underglow — makes the dash read as the powered heart of the deck
+  const dashGlow = new THREE.PointLight(0x00ffcc, 5 * CABIN_LIGHT, 6, 2); dashGlow.position.set(0, 1.0, -0.4); group.add(dashGlow);
 
   return { group, blinkers };
+}
+
+/* ---- destination hologram — cyan planet preview above the dash on row hover ---- */
+const HOLO_COLOR = '#7dfff0';
+
+function DestinationHolo({ hoveredRef, navReadyRef }) {
+  const groupRef = useRef();
+  const sphereRef = useRef();
+  const curRow = useRef(-1);
+
+  // Same 2K textures the real planets use — already in the GPU cache by the
+  // time anyone reaches the cockpit, so swapping maps is free.
+  const textures = useMemo(
+    () => NODES.map((n) => loadCachedTexture(n.isSun ? SUN_URL : REAL_PLANET_TEXTURES[n.realPlanet])),
+    []
+  );
+
+  const sphereMat = useMemo(() => new THREE.MeshBasicMaterial({
+    map: textures[0], color: new THREE.Color(HOLO_COLOR),
+    transparent: true, opacity: 0.85,
+    blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+  }), [textures]);
+
+  const rimMat = useMemo(() => new THREE.ShaderMaterial({
+    uniforms: { uColor: { value: new THREE.Color(HOLO_COLOR) } },
+    vertexShader: `
+      varying vec3 vNormal; varying vec3 vViewDir;
+      void main() {
+        vNormal = normalize(normalMatrix * normal);
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vViewDir = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 uColor;
+      varying vec3 vNormal; varying vec3 vViewDir;
+      void main() {
+        float f = pow(1.0 - max(dot(vNormal, vViewDir), 0.0), 2.4);
+        gl_FragColor = vec4(uColor, f * 0.7);
+      }
+    `,
+    transparent: true, depthWrite: false,
+    blending: THREE.AdditiveBlending, side: THREE.FrontSide,
+  }), []);
+
+  useFrame((state, delta) => {
+    const g = groupRef.current;
+    if (!g) return;
+    const m = useShipStore.getState().mode;
+    const row = m === 'cockpit' && navReadyRef.current ? hoveredRef.current : -1;
+    if (row >= 0 && row !== curRow.current) {
+      curRow.current = row;
+      sphereMat.map = textures[row];
+    }
+    // pop in on hover, shrink away when the cursor leaves the list
+    const target = row >= 0 ? 1 : 0.0001;
+    const s = g.scale.x + (target - g.scale.x) * Math.min(delta * 9, 1);
+    g.scale.setScalar(s);
+    g.visible = s > 0.02;
+    if (!g.visible) return;
+    if (sphereRef.current) sphereRef.current.rotation.y += delta * 0.9;
+    const t = state.clock.elapsedTime;
+    // holographic shimmer — two incommensurate sines read as instability
+    sphereMat.opacity = 0.78 + Math.sin(t * 24) * 0.05 + Math.sin(t * 61) * 0.03;
+  });
+
+  return (
+    <group ref={groupRef} position={[0, 2.1, -1.15]} scale={0.0001} visible={false}>
+      <mesh ref={sphereRef}>
+        <sphereGeometry args={[0.26, 32, 32]} />
+        <primitive object={sphereMat} attach="material" />
+      </mesh>
+      <mesh scale={1.12}>
+        <sphereGeometry args={[0.26, 24, 24]} />
+        <primitive object={rimMat} attach="material" />
+      </mesh>
+      {/* base ring + projection beam anchoring the holo to the dash */}
+      <mesh position={[0, -0.42, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.3, 0.36, 48]} />
+        <meshBasicMaterial color={HOLO_COLOR} transparent opacity={0.35} side={THREE.DoubleSide}
+          blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
+      </mesh>
+      <mesh position={[0, -0.24, 0]} rotation={[Math.PI, 0, 0]}>
+        <coneGeometry args={[0.33, 0.36, 24, 1, true]} />
+        <meshBasicMaterial color={HOLO_COLOR} transparent opacity={0.06} side={THREE.DoubleSide}
+          blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
+      </mesh>
+    </group>
+  );
+}
+
+/* ---- warp streaks — additive line tunnel that streams past during travel ---- */
+const STREAK_COUNT = 150;
+const STREAK_SPAN = 60;
+
+function makeStreakGeometry() {
+  const pos = new Float32Array(STREAK_COUNT * 2 * 3);
+  for (let i = 0; i < STREAK_COUNT; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = 1.6 + Math.random() * 5.5;
+    const x = Math.cos(a) * r, y = Math.sin(a) * r;
+    const z = -Math.random() * STREAK_SPAN;
+    const len = 2.5 + Math.random() * 5;
+    pos.set([x, y, z, x, y, z - len], i * 6);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  return g;
+}
+
+// Rides along with the camera in view space; two stacked copies leapfrog each
+// other for a seamless wrap. Occluded by the hull while still inside the deck,
+// which is exactly right — the streaks only fill the canopy view.
+function WarpStreaks() {
+  const camera = useThree((s) => s.camera);
+  const groupRef = useRef();
+  const opacity = useRef(0);
+  const geom = useMemo(() => makeStreakGeometry(), []);
+  const mat = useMemo(() => new THREE.LineBasicMaterial({
+    color: 0x9fffe8, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+  }), []);
+  useFrame((state, delta) => {
+    const m = useShipStore.getState().mode;
+    const target = m === 'travel' ? 0.85 : 0;
+    opacity.current += (target - opacity.current) * (m === 'travel' ? 2.5 : 6) * Math.min(delta, 0.05);
+    mat.opacity = opacity.current;
+    const g = groupRef.current;
+    if (!g) return;
+    g.visible = opacity.current > 0.02;
+    if (!g.visible) return;
+    g.position.copy(camera.position);
+    g.quaternion.copy(camera.quaternion);
+    const z = (state.clock.elapsedTime * 55) % STREAK_SPAN;
+    g.children[0].position.z = z;
+    g.children[1].position.z = z - STREAK_SPAN;
+  });
+  return (
+    <group ref={groupRef} visible={false}>
+      <lineSegments geometry={geom} material={mat} />
+      <lineSegments geometry={geom} material={mat} />
+    </group>
+  );
 }
 
 export default function Cockpit({ posRef, onEngage }) {
@@ -212,6 +365,9 @@ export default function Cockpit({ posRef, onEngage }) {
   const tRef = useRef(0);
   const groupRef = useRef();
 
+  // kill the engine hum if the whole scene unmounts (HMR, WebGL loss)
+  useEffect(() => () => stopHum(), []);
+
   // input listeners
   useEffect(() => {
     const el = gl.domElement;
@@ -246,7 +402,8 @@ export default function Cockpit({ posRef, onEngage }) {
     const target = new THREE.Vector3(p.x, p.y || 0, p.z);
     const dir = target.clone().sub(camera.position).normalize();
     const stop = target.clone().sub(dir.multiplyScalar(node.isSun ? 6 : Math.max((node.size || 1) * 4, 3)));
-    travel.current = { target: stop, look: target, node };
+    travel.current = { target: stop, look: target, node, startedAt: performance.now() };
+    engageBeep(); warpWhoosh();
     setMode('travel');
   };
 
@@ -277,6 +434,9 @@ export default function Cockpit({ posRef, onEngage }) {
     const sweep = (t * 1.4) % 6.283; ctx.strokeStyle = 'rgba(0,255,204,.7)'; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(sweep) * R, cy + Math.sin(sweep) * R); ctx.stroke();
     navList.forEach((s) => { const p = posRef?.current?.[s.id]; if (!p) return; const a = Math.atan2(p.z, p.x); const rr = Math.min(Math.hypot(p.x, p.z) / 36, 1) * R; ctx.fillStyle = s.color; ctx.beginPath(); ctx.arc(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr, 2.5, 0, 7); ctx.fill(); });
     ctx.fillStyle = '#6f93aa'; ctx.font = '10px monospace'; ctx.fillText('▸ look + click a row', 20, 302);
+    // CRT scanlines — sells the screen as a physical display
+    ctx.fillStyle = 'rgba(0,0,0,.13)';
+    for (let y = 8; y < SCRH - 8; y += 4) ctx.fillRect(8, y, SCRW - 16, 1);
     screen.texture.needsUpdate = true;
   };
 
@@ -286,7 +446,20 @@ export default function Cockpit({ posRef, onEngage }) {
     const t = (tRef.current += Math.min(delta, 0.05));
     const m = useShipStore.getState().mode;
     if (groupRef.current) groupRef.current.visible = m !== 'solar';
-    if (m === 'solar') { prevMode.current = 'solar'; return; } // cockpit idle while in the galaxy
+    if (m === 'solar') {
+      if (prevMode.current !== 'solar') stopHum();
+      prevMode.current = 'solar';
+      // restore the base FOV if we bailed out mid-travel
+      if (camera.fov !== 55) { camera.fov = 55; camera.updateProjectionMatrix(); }
+      return; // cockpit idle while in the galaxy
+    }
+    if (prevMode.current === 'solar') startHum();
+    // FOV punch during warp, ease back once seated/arrived
+    const targetFov = m === 'travel' ? 68 : 55;
+    if (Math.abs(camera.fov - targetFov) > 0.05) {
+      camera.fov += (targetFov - camera.fov) * Math.min(delta * 2.2, 1);
+      camera.updateProjectionMatrix();
+    }
 
     // entering the deck
     if (m === 'cockpit' && prevMode.current !== 'cockpit') {
@@ -327,11 +500,22 @@ export default function Cockpit({ posRef, onEngage }) {
         camPos.current.z = Math.max(BOUNDS.z[0], Math.min(BOUNDS.z[1], camPos.current.z));
       }
       camera.position.lerp(camPos.current, 0.4);
+      camera.position.y += Math.sin(t * 1.1) * 0.006; // idle sway — the ship feels alive
       const d = fv(yaw.current, pitch.current);
       camera.lookAt(camera.position.clone().add(d));
     } else if (m === 'travel' && travel.current) {
-      camera.position.lerp(travel.current.target, 0.045); camera.lookAt(travel.current.look);
+      camera.position.lerp(travel.current.target, 0.03); camera.lookAt(travel.current.look);
+      const elapsed = (performance.now() - (travel.current.startedAt || 0)) / 1000;
+      // launch shake — sharp, gone within the first half-second
+      const shake = Math.max(0, 0.45 - elapsed) * 0.05;
+      if (shake > 0) {
+        camera.position.x += (Math.random() - 0.5) * shake;
+        camera.position.y += (Math.random() - 0.5) * shake;
+      }
+      // gentle bank into the flight, released before arrival (~2.6s window)
+      camera.rotateZ(Math.sin(Math.min(elapsed * 1.2, Math.PI)) * 0.07);
       if (camera.position.distanceTo(travel.current.target) < 1.2) {
+        arrivalChime();
         onEngage?.(travel.current.node);   // open your NodeCard
         setMode('section');
       }
@@ -341,17 +525,41 @@ export default function Cockpit({ posRef, onEngage }) {
   });
 
   return (
-    <group ref={groupRef} position={COCKPIT_POS}>
-      <primitive object={built.group} />
-      <mesh
-        position={[0, 1.08, -0.08]} rotation={[-0.5, 0, 0]}
-        onPointerMove={(e) => { e.stopPropagation(); if (navReady.current) hovered.current = rowFromUv(e.uv); }}
-        onPointerOut={() => { hovered.current = -1; }}
-        onClick={(e) => { e.stopPropagation(); if (moved.current > 6) return; const r = rowFromUv(e.uv); if (r >= 0) startTravel(r); }}
-      >
-        <planeGeometry args={[1.9, 0.95]} />
-        <meshBasicMaterial map={screen.texture} transparent toneMapped={false} />
-      </mesh>
-    </group>
+    <>
+      <group ref={groupRef} position={COCKPIT_POS}>
+        <primitive object={built.group} />
+        <group position={[0, 1.08, -0.08]} rotation={[-0.5, 0, 0]}>
+          <mesh
+            onPointerMove={(e) => {
+              e.stopPropagation();
+              if (!navReady.current) return;
+              const r = rowFromUv(e.uv);
+              if (r !== hovered.current && r >= 0) hoverBlip();
+              hovered.current = r;
+            }}
+            onPointerOut={() => { hovered.current = -1; }}
+            onClick={(e) => { e.stopPropagation(); if (moved.current > 6) return; const r = rowFromUv(e.uv); if (r >= 0) startTravel(r); }}
+          >
+            <planeGeometry args={[1.9, 0.95]} />
+            <meshBasicMaterial map={screen.texture} transparent toneMapped={false} />
+          </mesh>
+          {/* glowing bezel frame around the nav screen */}
+          {[
+            { pos: [0, 0.492, 0.004], size: [1.94, 0.02, 0.012] },
+            { pos: [0, -0.492, 0.004], size: [1.94, 0.02, 0.012] },
+            { pos: [-0.96, 0, 0.004], size: [0.02, 1.0, 0.012] },
+            { pos: [0.96, 0, 0.004], size: [0.02, 1.0, 0.012] },
+          ].map((f, i) => (
+            <mesh key={i} position={f.pos}>
+              <boxGeometry args={f.size} />
+              <meshBasicMaterial color="#59ffdd" toneMapped={false} />
+            </mesh>
+          ))}
+        </group>
+        <DestinationHolo hoveredRef={hovered} navReadyRef={navReady} />
+      </group>
+      {/* world-space overlay — tracks the camera itself, so it lives outside COCKPIT_POS */}
+      <WarpStreaks />
+    </>
   );
 }
