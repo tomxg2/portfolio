@@ -4,10 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Camera, X, Hand, Timer, Maximize2, HandMetal, ShieldCheck, Sparkles } from 'lucide-react';
 import { useHandTracking } from '../hooks/useHandTracking.js';
 import CameraPreview from './CameraPreview.jsx';
+import { IS_MOBILE } from '../lib/device.js';
 
-const isMobile = () =>
-  typeof window !== 'undefined' &&
-  /Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i.test(navigator.userAgent);
 
 // ── Toast notification ────────────────────────────────────────────────────────
 function Toast({ message, onDismiss }) {
@@ -131,7 +129,7 @@ export default function GestureControl({ onGestureData }) {
   const [showToast, setShowToast]   = useState(false);
   const [toastMsg, setToastMsg]     = useState('');
   const [showHint, setShowHint]     = useState(false);
-  const mobile = isMobile();
+  const mobile = IS_MOBILE;
 
   const {
     isActive, isLoading, error,
@@ -162,17 +160,18 @@ export default function GestureControl({ onGestureData }) {
     setShowModal(false);
   }, [error]);
 
-  // Show callout hint once per session after a short delay
+  // Show the callout once per visitor, after the intro has settled — it used
+  // to pop over the scene on every new session within 2.5s of landing
   useEffect(() => {
-    if (mobile || sessionStorage.getItem(HINT_KEY)) return;
-    const show = setTimeout(() => setShowHint(true), 2500);
-    const hide = setTimeout(() => setShowHint(false), 10500);
+    if (mobile || localStorage.getItem(HINT_KEY)) return;
+    const show = setTimeout(() => { setShowHint(true); localStorage.setItem(HINT_KEY, '1'); }, 6000);
+    const hide = setTimeout(() => setShowHint(false), 14000);
     return () => { clearTimeout(show); clearTimeout(hide); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const dismissHint = () => {
     setShowHint(false);
-    sessionStorage.setItem(HINT_KEY, '1');
+    localStorage.setItem(HINT_KEY, '1');
   };
 
   const handleEnableClick = () => { dismissHint(); setShowModal(true); };
@@ -192,24 +191,17 @@ export default function GestureControl({ onGestureData }) {
       {/* Nav button + hint callout */}
       <div className="relative">
         {/* Hero CTA — the gesture control is the marquee feature, so this
-            button breaks out of the navbar styling: larger, stronger glow,
-            pulsing teal halo, animated hand emoji, "TRY IT" badge. */}
+            button is teal-tinted with a waving hand and a "New" badge. (The
+            pulsing halo it used to wear competed with the whole scene.) */}
         <button
           onClick={isActive ? handleStop : handleEnableClick}
           disabled={isLoading}
           className={`
-            relative flex items-center gap-2.5 px-4 py-2 text-[13px] font-semibold
-            lg-surface lg-pill lg-tint-teal transition-all duration-300
+            relative flex items-center gap-2.5 h-9 px-4 text-[13px] font-semibold
+            lg-surface lg-pill lg-tint-teal
             disabled:opacity-50 disabled:cursor-not-allowed
-            ${isActive ? 'text-brand-teal' : 'text-brand-teal'}
-            ${!isActive ? 'gesture-cta-pulse' : ''}
+            text-brand-teal
           `}
-          style={{
-            // Reinforce the teal halo beyond what lg-tint-teal provides
-            boxShadow: isActive
-              ? 'inset 0 1px 0 rgba(255,255,255,0.26), 0 0 24px rgba(0,255,204,0.32), 0 0 48px rgba(0,255,204,0.18)'
-              : 'inset 0 1px 0 rgba(255,255,255,0.26), 0 0 28px rgba(0,255,204,0.38), 0 0 56px rgba(0,255,204,0.20)',
-          }}
           aria-label={isActive ? 'Disable gesture control' : 'Enable gesture control'}
         >
           {isLoading ? (
@@ -250,8 +242,8 @@ export default function GestureControl({ onGestureData }) {
                 className="absolute -top-[7px] right-7 w-3.5 h-3.5 rotate-45"
                 style={{
                   background: 'rgba(17,17,17,0.95)',
-                  borderLeft: '1px solid rgba(96,165,250,0.25)',
-                  borderTop:  '1px solid rgba(96,165,250,0.25)',
+                  borderLeft: '1px solid rgba(0,255,204,0.22)',
+                  borderTop:  '1px solid rgba(0,255,204,0.22)',
                 }}
               />
               {/* Card */}
@@ -259,7 +251,7 @@ export default function GestureControl({ onGestureData }) {
                 className="relative rounded-xl px-4 py-3 shadow-2xl"
                 style={{
                   background: 'rgba(17,17,17,0.95)',
-                  border: '1px solid rgba(96,165,250,0.25)',
+                  border: '1px solid rgba(0,255,204,0.22)',
                   backdropFilter: 'blur(16px)',
                 }}
               >

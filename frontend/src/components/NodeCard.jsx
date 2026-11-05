@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useId, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  X, MapPin, ArrowUpRight, ChevronRight, CheckCircle2, User,
+  X, MapPin, ArrowUpRight, ChevronRight, CheckCircle2, User, Mail,
   Trophy, Gamepad2, Code2, Music,
 } from 'lucide-react';
 import { CATEGORY_COLORS } from '../data/nodes.js';
@@ -24,15 +24,53 @@ const INTEREST_ICONS = {
   music:    Music,
 };
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_URL = (import.meta.env.VITE_API_URL?.trim() ||
+  (import.meta.env.DEV ? 'http://localhost:3001' : '')).replace(/\/+$/, '');
 
 // ── Side panel ────────────────────────────────────────────────────────────────
-function Card({ color, children, onClose }) {
-  // Close on Escape
+function Card({ color, kicker, children, onClose }) {
+  const dialogRef = useRef(null);
+  const titleId = useId();
+
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    const previousFocus = document.activeElement;
+    const dialog = dialogRef.current;
+    dialog.querySelector('button')?.focus({ preventScroll: true });
+
+    const onKey = (event) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const controls = Array.from(dialog.querySelectorAll(
+        'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )).filter((element) => element.getClientRects().length > 0);
+      const firstControl = controls[0];
+      const lastControl = controls[controls.length - 1];
+      const focusOutside = !dialog.contains(document.activeElement);
+
+      if (!firstControl) {
+        event.preventDefault();
+        dialog.focus();
+      } else if (event.shiftKey && (document.activeElement === firstControl || focusOutside)) {
+        event.preventDefault();
+        lastControl.focus();
+      } else if (!event.shiftKey && (document.activeElement === lastControl || focusOutside)) {
+        event.preventDefault();
+        firstControl.focus();
+      }
+    };
+
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
+        previousFocus.focus({ preventScroll: true });
+      }
+    };
   }, [onClose]);
 
   return (
@@ -59,9 +97,12 @@ function Card({ color, children, onClose }) {
 
       {/* Side panel — liquid glass */}
       <motion.div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        className="fixed z-50 top-3 right-3 bottom-3 w-full max-w-[440px]
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="fixed z-50 top-3 right-3 bottom-3 left-3 sm:left-auto sm:w-full sm:max-w-[440px]
                    flex flex-col lg-surface lg-panel"
         style={{
           borderRadius: '24px',
@@ -88,8 +129,8 @@ function Card({ color, children, onClose }) {
               className="w-2 h-2 rounded-full"
               style={{ background: color, boxShadow: `0 0 10px ${color}, 0 0 4px ${color}` }}
             />
-            <span className="text-[10px] font-mono uppercase tracking-[0.24em] text-gray-500">
-              Node
+            <span id={titleId} className="text-[10px] font-mono uppercase tracking-[0.24em] text-gray-400">
+              {kicker}
             </span>
           </div>
           <button
@@ -448,12 +489,77 @@ export function InterestsCard({ content, color }) {
   );
 }
 
+// ── Direct contact links (under the form) ──────────────────────────────────────
+const LINK_ICONS = { github: GithubIcon, email: Mail };
+
+function ContactLinks({ links, location, color }) {
+  if (!links?.length && !location) return null;
+  return (
+    <div className="mt-7 pt-5 border-t border-white/[0.06]">
+      <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-gray-500 mb-3">Or reach me directly</p>
+      <div className="space-y-2">
+        {links?.map(({ type, label, handle, href }) => {
+          const Icon = LINK_ICONS[type] || ArrowUpRight;
+          return (
+            <a
+              key={href}
+              href={href}
+              target={type === 'email' ? undefined : '_blank'}
+              rel={type === 'email' ? undefined : 'noopener noreferrer'}
+              className="group flex items-center gap-3 px-3.5 py-2.5 rounded-xl bg-white/[0.03]
+                         border border-white/[0.06] hover:border-white/20 hover:bg-white/[0.06] transition-all"
+            >
+              <span className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                style={{ color, background: `${color}14` }}>
+                <Icon size={15} strokeWidth={1.75} />
+              </span>
+              <span className="flex-1 min-w-0">
+                <span className="block text-sm font-medium text-white">{label}</span>
+                <span className="block text-xs text-gray-500 truncate">{handle}</span>
+              </span>
+              <ArrowUpRight size={14} strokeWidth={2}
+                className="text-gray-600 group-hover:text-white transition-colors flex-shrink-0" />
+            </a>
+          );
+        })}
+      </div>
+      {location && (
+        <p className="flex items-center gap-1.5 mt-4 text-xs text-gray-500">
+          <MapPin size={12} strokeWidth={1.75} /> {location}
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ── Contact form ───────────────────────────────────────────────────────────────
-export function ContactCard({ content, color }) {
+export function ContactCard({ content, color, showHeading = true, showLinks = true }) {
   const [form, setForm] = useState({ name: '', email: '', message: '' });
   const [status, setStatus] = useState('idle'); // idle | loading | success | error
   const [errors, setErrors] = useState({});
   const [serverError, setServerError] = useState('');
+  const formId = useId();
+  const formRef = useRef(null);
+  const requestRef = useRef(null);
+  const successRef = useRef(null);
+
+  useEffect(() => () => {
+    const request = requestRef.current;
+    requestRef.current = null;
+    request?.abort();
+  }, []);
+
+  useEffect(() => {
+    if (status === 'success') successRef.current?.focus();
+  }, [status]);
+
+  const showErrors = (fieldErrors) => {
+    setErrors(fieldErrors);
+    const firstField = ['name', 'email', 'message'].find((field) => fieldErrors[field]);
+    if (firstField) {
+      requestAnimationFrame(() => formRef.current?.elements.namedItem(firstField)?.focus());
+    }
+  };
 
   const handleChange = (e) => {
     setForm((f) => ({ ...f, [e.target.name]: e.target.value }));
@@ -463,48 +569,72 @@ export function ContactCard({ content, color }) {
   const validate = () => {
     const e = {};
     if (!form.name.trim() || form.name.trim().length < 2) e.name = 'Name must be at least 2 characters';
-    if (!form.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) e.email = 'Valid email required';
+    else if (form.name.trim().length > 100) e.name = 'Name must be under 100 characters';
+    else if (!/^[\p{L}\p{M}\s'\-,.]+$/u.test(form.name.trim())) e.name = 'Name contains invalid characters';
+    if (!form.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) e.email = 'Valid email required';
+    else if (form.email.trim().length > 254) e.email = 'Email address too long';
     if (!form.message.trim() || form.message.trim().length < 10) e.message = 'Message must be at least 10 characters';
+    else if (form.message.trim().length > 2000) e.message = 'Message must be under 2000 characters';
     return e;
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (requestRef.current) return;
     const validationErrors = validate();
     if (Object.keys(validationErrors).length > 0) {
-      setErrors(validationErrors);
+      showErrors(validationErrors);
       return;
     }
+    const request = new AbortController();
+    requestRef.current = request;
+    const timeout = setTimeout(() => request.abort(), 15000);
     setStatus('loading');
     setServerError('');
     try {
       const res = await fetch(`${API_URL}/api/contact`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          name: form.name.trim(),
+          email: form.email.trim(),
+          message: form.message.trim(),
+        }),
+        signal: request.signal,
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
       if (!res.ok) {
-        if (data.details) {
+        if (Array.isArray(data?.details) && data.details.length > 0) {
           const fieldErrors = {};
           data.details.forEach((d) => { fieldErrors[d.field] = d.message; });
-          setErrors(fieldErrors);
+          showErrors(fieldErrors);
           setStatus('idle');
         } else {
-          throw new Error(data.error || 'Something went wrong');
+          throw new Error(data?.error || (res.status === 429
+            ? 'Too many messages. Please try again later.'
+            : 'Your message could not be sent. Please try again.'));
         }
         return;
       }
+      if (!data) throw new Error('Your message could not be sent. Please try again.');
       setStatus('success');
     } catch (err) {
-      setServerError(err.message || 'Something went wrong. Please try again.');
+      if (requestRef.current !== request) return;
+      setServerError(request.signal.aborted
+        ? 'The request timed out. Please try again.'
+        : err instanceof TypeError
+          ? 'Could not connect. Please try again shortly.'
+          : err.message || 'Your message could not be sent. Please try again.');
       setStatus('error');
+    } finally {
+      clearTimeout(timeout);
+      if (requestRef.current === request) requestRef.current = null;
     }
   };
 
   if (status === 'success') {
     return (
-      <div className="text-center py-8">
+      <div ref={successRef} role="status" tabIndex={-1} className="text-center py-8">
         <CheckCircle2 size={48} strokeWidth={1.5} className="mx-auto mb-4 text-brand-teal" />
         <h2 className="text-xl font-bold text-white mb-2">Message sent!</h2>
         <p className="text-sm text-gray-400">Thanks for reaching out. I'll get back to you soon.</p>
@@ -521,43 +651,67 @@ export function ContactCard({ content, color }) {
 
   return (
     <>
-      <h2 className="text-2xl font-bold text-white mb-1">{content.title}</h2>
-      <p className="text-sm text-gray-400 mb-5">{content.subtitle}</p>
+      {showHeading && <>
+        <h2 className="text-2xl font-bold text-white mb-1">{content.title}</h2>
+        <p className="text-sm text-gray-400 mb-5">{content.subtitle}</p>
+      </>}
 
       {serverError && (
-        <div className="mb-4 p-3 rounded-lg bg-red-900/20 border border-red-500/30 text-sm text-red-400">
+        <div role="alert" className="mb-4 p-3 rounded-lg bg-red-900/20 border border-red-500/30 text-sm text-red-400">
           {serverError}
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+      <form ref={formRef} onSubmit={handleSubmit} className="space-y-4" noValidate aria-busy={status === 'loading'}>
         <div>
+          <label htmlFor={`${formId}-name`} className="block text-xs font-medium text-gray-300 mb-1.5">Name</label>
           <input
+            id={`${formId}-name`}
             type="text"
             name="name"
+            autoComplete="name"
+            required
+            minLength={2}
+            maxLength={100}
+            aria-invalid={!!errors.name}
+            aria-describedby={errors.name ? `${formId}-name-error` : undefined}
             placeholder="Your name"
             value={form.name}
             onChange={handleChange}
             className={inputClass('name')}
             disabled={status === 'loading'}
           />
-          {errors.name && <p className="text-xs text-red-400 mt-1">{errors.name}</p>}
+          {errors.name && <p id={`${formId}-name-error`} role="alert" className="text-xs text-red-400 mt-1">{errors.name}</p>}
         </div>
         <div>
+          <label htmlFor={`${formId}-email`} className="block text-xs font-medium text-gray-300 mb-1.5">Email</label>
           <input
+            id={`${formId}-email`}
             type="email"
             name="email"
+            autoComplete="email"
+            required
+            maxLength={254}
+            aria-invalid={!!errors.email}
+            aria-describedby={errors.email ? `${formId}-email-error` : undefined}
             placeholder="your@email.com"
             value={form.email}
             onChange={handleChange}
             className={inputClass('email')}
             disabled={status === 'loading'}
           />
-          {errors.email && <p className="text-xs text-red-400 mt-1">{errors.email}</p>}
+          {errors.email && <p id={`${formId}-email-error`} role="alert" className="text-xs text-red-400 mt-1">{errors.email}</p>}
         </div>
         <div>
+          <label htmlFor={`${formId}-message`} className="block text-xs font-medium text-gray-300 mb-1.5">Message</label>
           <textarea
+            id={`${formId}-message`}
             name="message"
+            required
+            minLength={10}
+            maxLength={2000}
+            aria-invalid={!!errors.message}
+            aria-describedby={errors.message ? `${formId}-message-error` : undefined}
             placeholder="What's on your mind?"
             value={form.message}
             onChange={handleChange}
@@ -565,7 +719,7 @@ export function ContactCard({ content, color }) {
             className={`${inputClass('message')} resize-none`}
             disabled={status === 'loading'}
           />
-          {errors.message && <p className="text-xs text-red-400 mt-1">{errors.message}</p>}
+          {errors.message && <p id={`${formId}-message-error`} role="alert" className="text-xs text-red-400 mt-1">{errors.message}</p>}
         </div>
         <button
           type="submit"
@@ -583,6 +737,8 @@ export function ContactCard({ content, color }) {
           ) : 'Send Message'}
         </button>
       </form>
+
+      {showLinks && <ContactLinks links={content.links} location={content.location} color={color} />}
     </>
   );
 }
@@ -590,12 +746,14 @@ export function ContactCard({ content, color }) {
 // ── Public component ──────────────────────────────────────────────────────────
 export default function NodeCard({ node, onClose }) {
   const color = node ? CATEGORY_COLORS[node.category] : '#ffffff';
+  // header kicker names the section you're in (project lists sit under Projects)
+  const kicker = node?.content.type === 'projects_list' ? `Projects · ${node.label}` : node?.label;
 
   return (
     <AnimatePresence>
       {node && (
         <>
-          <Card color={color} onClose={onClose}>
+          <Card color={color} kicker={kicker} onClose={onClose}>
             {node.content.type === 'about'         && <AboutCard        content={node.content} color={color} />}
             {node.content.type === 'skills'        && <SkillsCard       content={node.content} />}
             {node.content.type === 'projects_list' && <ProjectsListCard content={node.content} color={color} />}

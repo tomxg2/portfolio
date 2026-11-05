@@ -26,22 +26,13 @@ export const PROJECTS_DATA = {
           live: null, // it's the site you're on — add a GitHub repo link here instead if public
         },
         {
-          title: 'Media Tracker',
-          subtitle: 'Films, series, anime, manga, games & books — one app',
+          title: 'Airform',
+          subtitle: 'A gesture-controlled instrument',
           description:
-            'A cross-platform mobile app to track everything I watch, read and play in one place. Powered by Trakt, AniList, IGDB and OpenLibrary with a Supabase backend.',
-          tech: ['React Native', 'Expo', 'TypeScript', 'Supabase'],
-          status: 'In development',
-          live: null,
-        },
-        {
-          title: 'Daily Routine Tracker PWA',
-          subtitle: 'Habit tracking, offline-first',
-          description:
-            'A Progressive Web App for building and tracking daily habits. Works fully offline with service workers and syncs back online automatically.',
-          tech: ['React', 'Vite PWA', 'IndexedDB', 'Workbox'],
-          status: 'Private',
-          live: null,
+            'Play a browser instrument with your hands, mouse, touch, or keyboard. Shape three synthesized voices, explore musical scales, and record performances against an audio-reactive 3D field.',
+          tech: ['React', 'Three.js', 'Tone.js', 'MediaPipe', 'Web Audio'],
+          status: 'Playable',
+          live: '/instrument',
         },
       ],
     },
@@ -126,6 +117,14 @@ export const NODES = [
       type: 'contact',
       title: 'Get in touch',
       subtitle: "Have a project idea, question, or just want to say hi? I'd love to hear from you.",
+      location: 'Zurich, Switzerland',
+      // shown under the form; type picks the icon (github | email | anything
+      // else gets an arrow), e.g.
+      //   { type: 'email', label: 'Email', handle: 'you@example.com', href: 'mailto:you@example.com' }
+      //   { type: 'linkedin', label: 'LinkedIn', handle: 'in/you', href: 'https://www.linkedin.com/in/you' }
+      links: [
+        { type: 'github', label: 'GitHub', handle: 'github.com/tomxg2', href: 'https://github.com/tomxg2' },
+      ],
     },
   },
 

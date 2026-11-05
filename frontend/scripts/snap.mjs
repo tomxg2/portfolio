@@ -21,7 +21,7 @@ const SNAP = join(dirname(fileURLToPath(import.meta.url)), 'snapshots');
 const args = process.argv.slice(2);
 const flag = (n) => args.includes(`--${n}`);
 const opt = (n, d) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : d; };
-const URL = opt('url', 'http://localhost:5199');
+const URL = opt('url', 'http://localhost:5199/lab');
 const BASELINE = flag('baseline');
 const CHANGED_PCT = 0.05;   // a view "changed" if more than this % of pixels moved
 
@@ -92,8 +92,9 @@ for (const v of VIEWS) {
       // and the pre-mount frame count varies with load timing
       const c = window.__orbit.current;
       c.autoRotate = false;
-      c.object.position.set(0, 26, 56);
-      c.target.set(0, 0, 0);
+      const home = window.__homeCam();
+      c.object.position.fromArray(home.pos);
+      c.target.fromArray(home.look);
       c.update();
     }
   }, v.mode);

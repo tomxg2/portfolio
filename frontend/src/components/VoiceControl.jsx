@@ -134,7 +134,7 @@ export default function VoiceControl({ onCommand }) {
     <div className="relative">
       <button
         onClick={toggle}
-        className={`lg-surface lg-pill w-8 h-8 transition-colors flex items-center justify-center flex-shrink-0
+        className={`lg-surface lg-pill w-8 h-8 flex items-center justify-center flex-shrink-0
                     ${listening ? 'lg-tint-teal text-brand-teal' : 'text-gray-300 hover:text-white'}`}
         aria-label={listening ? 'Stop voice control' : 'Start voice control'}
         title={listening ? 'Stop voice control' : 'Try saying "open projects"'}

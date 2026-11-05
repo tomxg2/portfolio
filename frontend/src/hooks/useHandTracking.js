@@ -48,6 +48,8 @@ export function useHandTracking() {
   const rafRef = useRef(null);
   const mountedRef = useRef(true);
   const busyRef = useRef(false); // an inference is in flight — never queue another
+  const generationRef = useRef(0);
+  const startingRef = useRef(false);
 
   // Smoothing state
   const smoothedPointerRef  = useRef(null);
@@ -140,11 +142,12 @@ export function useHandTracking() {
 
   const detect = useCallback(async () => {
     const video = videoRef.current;
-    if (!handsRef.current || !video || !mountedRef.current) return;
+    const hands = handsRef.current;
+    if (!hands || !video || !mountedRef.current) return;
 
     const hasRVFC = typeof video.requestVideoFrameCallback === 'function';
     const schedule = () => {
-      if (!mountedRef.current || !handsRef.current) return;
+      if (!mountedRef.current || handsRef.current !== hands) return;
       rafRef.current = hasRVFC
         ? video.requestVideoFrameCallback(detect)
         : requestAnimationFrame(detect);
@@ -163,16 +166,29 @@ export function useHandTracking() {
     busyRef.current = true;
     lastInferRef.current = now;
     try {
-      await handsRef.current.send({ image: video });
+      await hands.send({ image: video });
     } catch {
       // MediaPipe errors are non-fatal during teardown
     }
+    if (handsRef.current !== hands) return;
     busyRef.current = false;
     schedule();
   }, []);
 
   // ── Start tracking ────────────────────────────────────────────────────────
   const startTracking = useCallback(async () => {
+    if (startingRef.current || handsRef.current) return;
+    const generation = ++generationRef.current;
+    startingRef.current = true;
+    const isCurrent = () => mountedRef.current && generationRef.current === generation;
+    let pendingStream = null;
+    let pendingHands = null;
+    const releasePending = () => {
+      if (pendingHands) void Promise.resolve(pendingHands.close()).catch(() => {});
+      pendingStream?.getTracks().forEach((track) => track.stop());
+      if (streamRef.current === pendingStream) streamRef.current = null;
+      if (videoRef.current?.srcObject === pendingStream) videoRef.current.srcObject = null;
+    };
     setIsLoading(true);
     setError(null);
 
@@ -188,12 +204,16 @@ export function useHandTracking() {
         video: { width: 320, height: 240, facingMode: 'user' },
         audio: false,
       });
+      pendingStream = stream;
+      if (!isCurrent()) { releasePending(); return; }
       streamRef.current = stream;
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
+
+      if (!isCurrent()) { releasePending(); return; }
 
       if (!window.Hands) {
         await new Promise((resolve, reject) => {
@@ -206,9 +226,12 @@ export function useHandTracking() {
         });
       }
 
+      if (!isCurrent()) { releasePending(); return; }
+
       const hands = new window.Hands({
         locateFile: (file) => `/mediapipe/${file}`,
       });
+      pendingHands = hands;
 
       hands.setOptions({
         maxNumHands: 2,
@@ -218,7 +241,7 @@ export function useHandTracking() {
       });
 
       hands.onResults((results) => {
-        if (!mountedRef.current) return;
+        if (!isCurrent()) return;
 
         const lmList  = results.multiHandLandmarks?.[0] ?? null;
         const lmList2 = results.multiHandLandmarks?.[1] ?? null;
@@ -297,31 +320,33 @@ export function useHandTracking() {
       });
 
       await hands.initialize();
-      handsRef.current = hands;
 
-      if (!mountedRef.current) {
-        hands.close();
-        stream.getTracks().forEach((t) => t.stop());
-        return;
-      }
+      if (!isCurrent()) { releasePending(); return; }
+      handsRef.current = hands;
 
       setIsActive(true);
       setIsLoading(false);
 
       detect();
     } catch (err) {
-      if (!mountedRef.current) return;
+      releasePending();
+      if (!isCurrent()) return;
       setIsLoading(false);
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         setError('camera_denied');
       } else {
         setError(err.message || 'Failed to start hand tracking');
       }
+    } finally {
+      if (generationRef.current === generation) startingRef.current = false;
     }
   }, [classifyGesture, drawSkeleton, detect]);
 
   // ── Stop tracking ─────────────────────────────────────────────────────────
   const stopTracking = useCallback(() => {
+    generationRef.current++;
+    startingRef.current = false;
+    setIsLoading(false);
     if (rafRef.current != null) {
       cancelAnimationFrame(rafRef.current);
       // rafRef may hold a requestVideoFrameCallback handle instead

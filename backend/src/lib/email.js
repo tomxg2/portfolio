@@ -1,16 +1,17 @@
 import { Resend } from 'resend';
 
-if (!process.env.RESEND_API_KEY) {
-  throw new Error('Missing RESEND_API_KEY environment variable');
-}
-
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Email is best-effort (the submission is already stored in Supabase), so a
+// missing key must not crash the server at import time — it only makes
+// sendContactNotification throw, which the contact route logs and swallows.
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+if (!resend) console.warn('[email] RESEND_API_KEY not set — contact notifications are disabled');
 
 /**
  * Send a contact form notification email to Tom.
  * @param {{ name: string, email: string, message: string }} data
  */
 export async function sendContactNotification({ name, email, message }) {
+  if (!resend) throw new Error('Missing RESEND_API_KEY environment variable');
   const to = process.env.CONTACT_EMAIL;
   if (!to) throw new Error('Missing CONTACT_EMAIL environment variable');
 

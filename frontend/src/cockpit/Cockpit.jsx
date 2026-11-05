@@ -27,7 +27,7 @@ import { REAL_PLANET_TEXTURES, SUN_URL, loadCachedTexture } from '../lib/planetT
 // TUNE THESE to frame the planets in the window:
 const COCKPIT_POS = new THREE.Vector3(0, -9.5, 58); // lower Y = planets sit HIGHER in the window
 const LOOK_AT = new THREE.Vector3(0, 0, 0);        // point the seat aims at (the system); raise Y to lift planets
-const CABIN_LIGHT = 1.0;                            // master cabin brightness — raise if too dark, lower if too bright
+const CABIN_LIGHT = 0.62;                           // master cabin brightness — raise if too dark, lower if too bright
 const OX = COCKPIT_POS.x, OY = COCKPIT_POS.y, OZ = COCKPIT_POS.z;
 
 const SEAT = new THREE.Vector3(OX + 0, OY + 1.9, OZ + 2.9);
@@ -44,6 +44,18 @@ const OBST = [
 ];
 const hits = (x, z) => OBST.some((o) => x > o.x0 - PR && x < o.x1 + PR && z > o.z0 - PR && z < o.z1 + PR);
 const SCRW = 640, SCRH = 320;
+// the site's mono face (loaded in index.html) — bare `monospace` fell back to Courier
+const NAV_FONT = '"JetBrains Mono", ui-monospace, monospace';
+
+// one-line row caption: the node's subtitle clipped at a word boundary
+// (the projects hub has no subtitle of its own)
+const NAV_SUB_MAX = 38;
+function navSubtitle(n) {
+  const t = n.content?.type === 'projects_hub' ? 'Personal & Swisscom work' : (n.content?.subtitle || '');
+  if (t.length <= NAV_SUB_MAX) return t;
+  const cut = t.lastIndexOf(' ', NAV_SUB_MAX - 1);
+  return t.slice(0, cut > 0 ? cut : NAV_SUB_MAX - 1).replace(/[,.;:]$/, '') + '…';
+}
 
 /* ---- imperative geometry build (local coords; mounted under a positioned group) ---- */
 // Interior v2 — an octagonal hull tube dressed in AI-generated panel textures
@@ -67,10 +79,12 @@ function buildCockpit(tex, env) {
   // panel grooves instead of reading as a flat decal.
   // b is a bundle { c: color, n: normal, r: roughness } — n/r generated
   // offline from the art (scripts/gen-cockpit-maps.mjs, dev server running)
-  const M = (b, { rough = .62, metal = .3, glow = .3, fallback = 0x39424d, ns = 1 } = {}) => {
-    const m = new THREE.MeshStandardMaterial({ color: b ? 0xffffff : fallback, map: b?.c || null, roughness: rough, metalness: metal });
+  // tint darkens the bright generated art toward gunmetal so the cabin reads
+  // as a dim flight deck lit by its consoles, not a white-lit corridor
+  const M = (b, { rough = .62, metal = .3, glow = .3, fallback = 0x39424d, ns = 1, tint = 0xffffff } = {}) => {
+    const m = new THREE.MeshStandardMaterial({ color: b ? tint : fallback, map: b?.c || null, roughness: rough, metalness: metal });
     if (b) {
-      m.emissiveMap = b.c; m.emissive = new THREE.Color(0xffffff); m.emissiveIntensity = glow;
+      m.emissiveMap = b.c; m.emissive = new THREE.Color(tint); m.emissiveIntensity = glow;
       if (b.n) { m.normalMap = b.n; m.normalScale = new THREE.Vector2(ns, ns); }
       else { m.bumpMap = b.c; m.bumpScale = 0.6; }
       if (b.r) { m.roughnessMap = b.r; m.roughness = 1; }
@@ -98,17 +112,17 @@ function buildCockpit(tex, env) {
   };
 
   // ── hull: octagonal tube along z, flat facets at floor / walls / ceiling ──
-  const hullMat = M(tex.wall, { rough: .72, metal: .28, glow: .27, ns: 1.1 });
+  const hullMat = M(tex.wall, { rough: .72, metal: .28, glow: .1, ns: 1.1, tint: 0x8c97a3 });
   hullMat.side = THREE.BackSide;
   const tubeGeo = new THREE.CylinderGeometry(3.2, 3.2, 10.4, 8, 1, true);
-  uvXform(tubeGeo, 4, 1.6);
+  uvXform(tubeGeo, 6, 2.4);
   tubeGeo.rotateY(Math.PI / 8);   // facet centres to 0/45/90°…
   tubeGeo.rotateX(Math.PI / 2);   // axis along z
   const tube = new THREE.Mesh(tubeGeo, hullMat);
   tube.position.set(0, 1.4, 1.5);
   group.add(tube);
   // shared front-side wall-panel material for caps / bulkheads / cabinets
-  const hullPanelMat = M(tex.wall, { glow: .28, ns: 1 });
+  const hullPanelMat = M(tex.wall, { glow: .1, ns: 1, tint: 0x8c97a3 });
   // glowing seams along the upper facet corners
   box(.03, .03, 9.8, -1.22, 4.32, 1.5, stripTeal, 0, 0, Math.PI / 4);
   box(.03, .03, 9.8, 1.22, 4.32, 1.5, stripTeal, 0, 0, -Math.PI / 4);
@@ -132,7 +146,7 @@ function buildCockpit(tex, env) {
   const floorGeo = new THREE.PlaneGeometry(6.2, 10.4);
   uvXform(floorGeo, 2, 3.4);
   floorGeo.rotateX(-Math.PI / 2);
-  const floor = new THREE.Mesh(floorGeo, M(tex.floor, { rough: .8, metal: .3, glow: .26 }));
+  const floor = new THREE.Mesh(floorGeo, M(tex.floor, { rough: .8, metal: .3, glow: .1, tint: 0x9aa3ad }));
   floor.position.set(0, 0, 1.5);
   group.add(floor);
   box(.04, .02, 9.4, -.55, .015, 1.5, stripTeal);
@@ -142,12 +156,12 @@ function buildCockpit(tex, env) {
   const ceilGeo = new THREE.PlaneGeometry(2.4, 9.8);
   uvXform(ceilGeo, 1, 3.2);
   ceilGeo.rotateX(Math.PI / 2);                              // face down
-  const ceil = new THREE.Mesh(ceilGeo, M(tex.ceiling, { glow: .3 }));
+  const ceil = new THREE.Mesh(ceilGeo, M(tex.ceiling, { glow: .16, tint: 0x9aa3ad }));
   ceil.position.set(0, 4.35, 1.5);
   group.add(ceil);
   [-0.85, 0.85].forEach((x) => {
     box(.55, .05, 7.6, x, 4.33, 1.6, matDark);               // recess frame
-    box(.45, .05, 7.4, x, 4.3, 1.6, LM(0xb9cbdd));           // diffuser (kept below blow-out)
+    box(.45, .05, 7.4, x, 4.3, 1.6, LM(0x7d8fa3));           // diffuser (dim — consoles are the key light)
   });
 
   // ── front bulkhead: solid wall with a trapezoid windshield cut into it ──
@@ -160,10 +174,10 @@ function buildCockpit(tex, env) {
   }
   const frontShape = new THREE.Shape(octa);
   const winHole = new THREE.Path();                          // cap-local (tube centre y=1.4)
-  winHole.moveTo(-2.35, -0.15);
-  winHole.lineTo(-1.45, 2.15);
-  winHole.lineTo(1.45, 2.15);
-  winHole.lineTo(2.35, -0.15);
+  winHole.moveTo(-2.6, -0.25);
+  winHole.lineTo(-1.45, 2.45);
+  winHole.lineTo(1.45, 2.45);
+  winHole.lineTo(2.6, -0.25);
   winHole.closePath();
   frontShape.holes.push(winHole);
   const front = new THREE.Mesh(uvXform(new THREE.ShapeGeometry(frontShape), .3, .3), hullPanelMat);
@@ -171,19 +185,19 @@ function buildCockpit(tex, env) {
   group.add(front);
   // windshield frame trim (divider posts removed — they only blocked the view)
   [-1, 1].forEach((s) => {
-    box(.05, 2.48, .08, s * 1.91, 2.4, -3.56, stripTeal, 0, 0, s * .373); // slanted edges
+    box(.05, 2.98, .08, s * 2.025, 2.5, -3.56, stripTeal, 0, 0, s * .402); // slanted edges
   });
-  box(4.72, .05, .08, 0, 1.25, -3.56, stripTeal);            // sill
-  box(2.92, .05, .08, 0, 3.55, -3.56, stripTeal);            // header
+  box(5.32, .05, .08, 0, 1.15, -3.56, stripTeal);            // sill
+  box(3.02, .05, .08, 0, 3.85, -3.56, stripTeal);            // header
   // one faint reflective pane fills the opening — the env-map sheen sells
   // "there's glass here" without darkening the view
   const paneShape = new THREE.Shape([
-    new THREE.Vector2(-2.35, -0.15), new THREE.Vector2(2.35, -0.15),
-    new THREE.Vector2(1.45, 2.15), new THREE.Vector2(-1.45, 2.15),
+    new THREE.Vector2(-2.6, -0.25), new THREE.Vector2(2.6, -0.25),
+    new THREE.Vector2(1.45, 2.45), new THREE.Vector2(-1.45, 2.45),
   ]);
   const pane = new THREE.Mesh(new THREE.ShapeGeometry(paneShape), new THREE.MeshPhysicalMaterial({
-    color: 0xcfe4f2, transparent: true, opacity: 0.1, roughness: 0.05, metalness: 0,
-    clearcoat: 1, envMap: env || null, envMapIntensity: 1.4, depthWrite: false,
+    color: 0x0b1620, transparent: true, opacity: 0.12, roughness: 0.05, metalness: 0,
+    clearcoat: 1, envMap: env || null, envMapIntensity: 0.45, depthWrite: false,
   }));
   pane.position.set(0, 1.4, -3.6);
   group.add(pane);
@@ -202,7 +216,7 @@ function buildCockpit(tex, env) {
   // the generated art is a complete dashboard face — wrap it ONCE around the
   // curved console instead of tiling it, so it reads as the actual instrument
   // panel (its dark border blends into the cabin shadow)
-  const dashMat = M(tex.dash, { rough: .5, metal: .4, glow: .5 });
+  const dashMat = M(tex.dash, { rough: .5, metal: .4, glow: .42 });
   dashMat.side = THREE.DoubleSide;
   // arc bows toward -z so the console wraps in FRONT of the pilot (thetaStart
   // centred on PI); the old 1.16*PI start bowed it left, into the side console
@@ -219,9 +233,13 @@ function buildCockpit(tex, env) {
   topGeo.rotateX(-Math.PI / 2);                              // lie flat, arc toward -z
   const ctop = new THREE.Mesh(topGeo, dashMat);
   ctop.position.set(0, 1.251, 0.4); group.add(ctop);
-  // inner skirt facing the pilot, so the console reads as a solid cabinet
-  const skirtMat = new THREE.MeshStandardMaterial({ color: 0x171c22, roughness: .5, metalness: .55, side: THREE.DoubleSide, envMap: env || null, envMapIntensity: .8 });
-  const skirt = new THREE.Mesh(new THREE.CylinderGeometry(1.12, 1.23, 1.26, 48, 1, true, Math.PI * 0.66, Math.PI * 0.68), skirtMat);
+  // inner skirt facing the pilot, so the console reads as a solid cabinet —
+  // dressed in the (darker-tinted) wall panelling: a flat untextured face
+  // here was the biggest blank surface in the pilot's eyeline
+  const skirtMat = M(tex.wall, { glow: .08, ns: 1, tint: 0x6c7682 });
+  skirtMat.side = THREE.DoubleSide;
+  const skirtGeo = uvXform(new THREE.CylinderGeometry(1.12, 1.23, 1.26, 48, 1, true, Math.PI * 0.66, Math.PI * 0.68), .75, .3, .2, .35);
+  const skirt = new THREE.Mesh(skirtGeo, skirtMat);
   skirt.position.set(0, .625, 0.4); group.add(skirt);
   // glowing lip along the console's inner edge
   const lipGeo = new THREE.TorusGeometry(1.13, .018, 10, 64, Math.PI * 0.68);
@@ -231,7 +249,9 @@ function buildCockpit(tex, env) {
   // end caps — the cabinet is a hollow arc between dash (outer) and skirt
   // (inner); without these you could see straight into it from the sides
   [-1, 1].forEach((s) => {
-    box(.95, 1.26, .07, s * 1.367, .625, -0.352, matDark, 0, s * .503);
+    const capPanel = new THREE.Mesh(uvXform(new THREE.BoxGeometry(.95, 1.26, .07), .28, .3, .4, .35), skirtMat);
+    capPanel.position.set(s * 1.367, .625, -0.352); capPanel.rotation.y = s * .503;
+    group.add(capPanel);
   });
 
   // monitor housing — a dark shell seated on the console top; the interactive
@@ -485,7 +505,7 @@ export default function Cockpit({ posRef, onEngage }) {
   const setMode = useShipStore((s) => s.setMode);
 
   const navList = useMemo(
-    () => NODES.map((n) => ({ id: n.id, label: n.label, color: n.color, sub: n.content?.subtitle?.slice(0, 40) || '', node: n })),
+    () => NODES.map((n) => ({ id: n.id, label: n.label, color: n.color, sub: navSubtitle(n), node: n })),
     []
   );
 
@@ -495,7 +515,7 @@ export default function Cockpit({ posRef, onEngage }) {
     const ctx = canvas.getContext('2d');
     const texture = new THREE.CanvasTexture(canvas);
     texture.anisotropy = 8;
-    const rects = navList.map((s, i) => ({ x: 16, y: 64 + i * 34, w: 392, h: 32 }));
+    const rects = navList.map((s, i) => ({ x: 16, y: 56 + i * 33, w: 392, h: 31 }));
     return { canvas, ctx, texture, rects };
   }, [navList]);
 
@@ -506,7 +526,7 @@ export default function Cockpit({ posRef, onEngage }) {
     const loader = new THREE.TextureLoader();
     const load = (url, srgb = true) => new Promise((res) => loader.load(
       url,
-      (t) => { if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 16; res(t); },
+      (t) => { if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.MirroredRepeatWrapping; t.anisotropy = 16; res(t); },
       undefined,
       () => res(null),
     ));
@@ -615,13 +635,13 @@ export default function Cockpit({ posRef, onEngage }) {
     ctx.strokeStyle = 'rgba(0,255,204,.45)'; ctx.lineWidth = 2; ctx.strokeRect(6, 6, SCRW - 12, SCRH - 12);
     if (!navReady.current) {
       const p = enterT.current == null ? 0 : Math.min((t - enterT.current) / 1.9, 1);
-      ctx.fillStyle = '#00ffcc'; ctx.font = '600 22px monospace'; ctx.fillText('POWERING ON', SCRW / 2 - 90, SCRH / 2 - 18);
+      ctx.fillStyle = '#00ffcc'; ctx.font = `600 22px ${NAV_FONT}`; ctx.fillText('POWERING ON', SCRW / 2 - 90, SCRH / 2 - 18);
       ctx.strokeStyle = 'rgba(0,255,204,.6)'; ctx.strokeRect(SCRW / 2 - 130, SCRH / 2, 260, 16);
       ctx.fillStyle = '#00ffcc'; ctx.fillRect(SCRW / 2 - 128, SCRH / 2 + 2, 256 * p, 12);
-      ctx.font = '11px monospace'; ctx.fillStyle = '#7fd6c8'; ctx.fillText('NAV CORE · ' + Math.round(p * 100) + '%', SCRW / 2 - 58, SCRH / 2 + 42);
+      ctx.font = `12px ${NAV_FONT}`; ctx.fillStyle = '#7fd6c8'; ctx.fillText('NAV CORE · ' + Math.round(p * 100) + '%', SCRW / 2 - 58, SCRH / 2 + 42);
       screen.texture.needsUpdate = true; return;
     }
-    ctx.fillStyle = '#00ffcc'; ctx.font = '600 18px monospace'; ctx.fillText('NAV // SELECT DESTINATION', 20, 38);
+    ctx.fillStyle = '#00ffcc'; ctx.font = `600 18px ${NAV_FONT}`; ctx.fillText('NAV // SELECT DESTINATION', 20, 37);
     navList.forEach((s, i) => {
       const r = screen.rects[i];
       if (i === hovered.current) {
@@ -633,15 +653,15 @@ export default function Cockpit({ posRef, onEngage }) {
         ctx.strokeStyle = 'rgba(0,255,204,.9)'; ctx.lineWidth = 1; ctx.strokeRect(r.x + .5, r.y + .5, r.w - 1, r.h - 1);
       }
       ctx.fillStyle = s.color; ctx.beginPath(); ctx.arc(r.x + 16, r.y + r.h / 2, 5, 0, 7); ctx.fill();
-      ctx.fillStyle = i === hovered.current ? '#fff' : '#cfe7f5'; ctx.font = '600 14px monospace'; ctx.fillText(s.label.toUpperCase(), r.x + 34, r.y + 15);
-      ctx.fillStyle = '#6f93aa'; ctx.font = '10px monospace'; ctx.fillText(s.sub, r.x + 34, r.y + 28);
-      ctx.fillStyle = '#3f6076'; ctx.fillText(String(i + 1).padStart(2, '0'), r.x + r.w - 22, r.y + 19);
+      ctx.fillStyle = i === hovered.current ? '#fff' : '#cfe7f5'; ctx.font = `600 15px ${NAV_FONT}`; ctx.fillText(s.label.toUpperCase(), r.x + 34, r.y + 13);
+      ctx.fillStyle = '#8fb3c8'; ctx.font = `11.5px ${NAV_FONT}`; ctx.fillText(s.sub, r.x + 34, r.y + 28);
+      ctx.fillStyle = '#4f7790'; ctx.font = `600 12px ${NAV_FONT}`; ctx.fillText(String(i + 1).padStart(2, '0'), r.x + r.w - 24, r.y + 19);
     });
-    const cx = SCRW - 110, cy = 200, R = 84;
+    const cx = SCRW - 112, cy = 176, R = 92;
     ctx.strokeStyle = 'rgba(0,255,204,.3)'; ctx.lineWidth = 1;[.4, .7, 1].forEach((rr) => { ctx.beginPath(); ctx.arc(cx, cy, R * rr, 0, 7); ctx.stroke(); });
     const sweep = (t * 1.4) % 6.283; ctx.strokeStyle = 'rgba(0,255,204,.7)'; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(sweep) * R, cy + Math.sin(sweep) * R); ctx.stroke();
     navList.forEach((s) => { const p = posRef?.current?.[s.id]; if (!p) return; const a = Math.atan2(p.z, p.x); const rr = Math.min(Math.hypot(p.x, p.z) / 36, 1) * R; ctx.fillStyle = s.color; ctx.beginPath(); ctx.arc(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr, 2.5, 0, 7); ctx.fill(); });
-    ctx.fillStyle = '#6f93aa'; ctx.font = '10px monospace'; ctx.fillText('▸ look + click a row', 20, 302);
+    ctx.fillStyle = '#8fb3c8'; ctx.font = `12px ${NAV_FONT}`; ctx.fillText('▸ click a destination to engage', 20, 307);
     // CRT scanlines — sells the screen as a physical display
     ctx.fillStyle = 'rgba(0,0,0,.13)';
     for (let y = 8; y < SCRH - 8; y += 4) ctx.fillRect(8, y, SCRW - 16, 1);

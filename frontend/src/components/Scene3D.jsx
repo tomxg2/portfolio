@@ -1,4 +1,4 @@
-import { useRef, useMemo, useEffect, useState, useCallback, Suspense } from 'react';
+import { useRef, useMemo, useEffect, useState, useCallback, Suspense, createRef } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Html, Line, PerformanceMonitor, useGLTF } from '@react-three/drei';
 import { EffectComposer, Bloom, GodRays } from '@react-three/postprocessing';
@@ -14,11 +14,7 @@ import {
 } from '../lib/planetTextures.js';
 import Cockpit from '../cockpit/Cockpit.jsx';
 import { useShipStore } from '../cockpit/useShipStore.js';
-
-const IS_MOBILE = typeof window !== 'undefined' &&
-  (/Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i.test(navigator.userAgent) ||
-  // iPadOS 13+ reports as "Macintosh" — detect via multi-touch
-  (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent)));
+import { IS_MOBILE } from '../lib/device.js';
 
 // Adaptive geometry budget — phones get coarser spheres + fewer stars.
 const PLANET_SEGS     = IS_MOBILE ? 24 : 40;
@@ -39,7 +35,7 @@ function makeRng(seed) {
 // Only Earth gets a Fresnel atmosphere — other bodies kept bare so the surface
 // texture reads cleanly. Per user preference.
 const REAL_PLANET_ATMOSPHERES = {
-  earth: { color: '#7cb3ff', intensity: 1.05 }, // Rayleigh-scattered blue
+  earth: { color: '#7cb3ff', intensity: 0.75 }, // Rayleigh-scattered blue
 };
 
 // Build a RingGeometry whose UVs run radially (u=0 inner → u=1 outer) so the
@@ -281,8 +277,10 @@ function ShootingStar({ startPos, endPos, born }) {
 const SHIP_URL = '/models/player_ship.glb';
 const SHIP_ORBIT_R = 27;
 const SHIP_ORBIT_SPEED = 0.045;
+// Big enough to read as a ship (not a speck) from the home view.
+const SHIP_SIZE = 3.4;
 
-function PlayerShip({ onBoard }) {
+function PlayerShip({ onBoard, hideLabel }) {
   const { scene: shipScene } = useGLTF(SHIP_URL);
   const [hovered, setHovered] = useState(false);
   const groupRef = useRef();
@@ -291,14 +289,14 @@ function PlayerShip({ onBoard }) {
   const scaleVec = useMemo(() => new THREE.Vector3(1, 1, 1), []);
   const mode = useShipStore((s) => s.mode);
 
-  // Normalize whatever size the GLB comes in at to ~2.6 scene units and
+  // Normalize whatever size the GLB comes in at to ~SHIP_SIZE scene units and
   // recentre it, then give the materials the same emissive floor the planets
   // use so the dark side stays readable.
   const ship = useMemo(() => {
     const s = shipScene.clone(true);
     const box = new THREE.Box3().setFromObject(s);
     const size = box.getSize(new THREE.Vector3());
-    const scale = 2.6 / Math.max(size.x, size.y, size.z);
+    const scale = SHIP_SIZE / Math.max(size.x, size.y, size.z);
     s.scale.setScalar(scale);
     const center = box.getCenter(new THREE.Vector3()).multiplyScalar(scale);
     s.position.sub(center);
@@ -349,17 +347,14 @@ function PlayerShip({ onBoard }) {
         {/* generous hit sphere for gestures + easier clicking */}
         <mesh userData={{ nodeId: 'ship' }}
           onClick={(e) => { if (!inSolar) return; e.stopPropagation(); onBoard?.(); }}>
-          <sphereGeometry args={[2.0, 8, 8]} />
+          <sphereGeometry args={[2.4, 8, 8]} />
           <meshBasicMaterial transparent opacity={0} depthWrite={false} />
         </mesh>
-        {hovered && inSolar && (
-          <group position={[0, -1.5, 0]}>
+        {/* Always labelled like the planets so it's discoverable; hover spells out the action */}
+        {inSolar && !hideLabel && (
+          <group position={[0, -1.8, 0]}>
             <Html center zIndexRange={[9, 0]} style={{ pointerEvents: 'none', userSelect: 'none' }}>
-              <span style={{
-                color: '#ffb454', fontSize: '10px', fontFamily: 'monospace',
-                whiteSpace: 'nowrap', letterSpacing: '0.08em',
-                textShadow: '0 1px 4px #000, 0 0 10px #000',
-              }}>MY SHIP · CLICK TO BOARD</span>
+              <SceneLabel text={hovered ? 'My ship · click to board' : 'My ship'} color="#ffb454" active={hovered} />
             </Html>
           </group>
         )}
@@ -377,25 +372,52 @@ const BELT_COUNT = IS_MOBILE ? 120 : 380;
 const BELT_INNER = 12.9;
 const BELT_OUTER = 13.9;
 
+// Rocks shrink to nothing as the camera closes in (vertex shader, scaled about
+// each rock's own centre), so focus views that park the camera inside or next
+// to the belt — Experience in particular — don't fill the frame with boulders.
+const BELT_FADE_NEAR = 3.0;
+const BELT_FADE_FAR  = 8.0;
+
 function AsteroidBelt() {
   const groupRef = useRef();
   const meshRef = useRef();
+
+  const material = useMemo(() => {
+    const m = new THREE.MeshStandardMaterial({
+      color: '#ffffff', emissive: '#4a4540', emissiveIntensity: 0.22, roughness: 0.92, metalness: 0.05,
+    });
+    m.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', `
+        vec4 rockCentre = modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+        transformed *= smoothstep(${BELT_FADE_NEAR.toFixed(1)}, ${BELT_FADE_FAR.toFixed(1)}, distance(rockCentre.xyz, cameraPosition));
+        #include <project_vertex>
+      `);
+    };
+    return m;
+  }, []);
 
   useEffect(() => {
     const mesh = meshRef.current;
     if (!mesh) return;
     const dummy = new THREE.Object3D();
+    const tint = new THREE.Color();
     const rng = makeRng(1337);
     for (let i = 0; i < BELT_COUNT; i++) {
       const a = rng() * Math.PI * 2;
       const r = BELT_INNER + rng() * (BELT_OUTER - BELT_INNER);
       dummy.position.set(Math.sin(a) * r, (rng() - 0.5) * 0.5, Math.cos(a) * r);
       dummy.rotation.set(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI);
-      dummy.scale.setScalar(0.03 + rng() * 0.075);
+      // squashed, uneven rocks instead of identical dice
+      const k = 0.03 + rng() * 0.075;
+      dummy.scale.set(k * (0.7 + rng() * 0.6), k * (0.55 + rng() * 0.4), k * (0.7 + rng() * 0.6));
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
+      // warm-grey to dusty-brown spread
+      tint.setHSL(0.07 + rng() * 0.04, 0.08 + rng() * 0.14, 0.38 + rng() * 0.22);
+      mesh.setColorAt(i, tint);
     }
     mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   }, []);
 
   useFrame((_, delta) => {
@@ -404,90 +426,80 @@ function AsteroidBelt() {
 
   return (
     <group ref={groupRef}>
-      <instancedMesh ref={meshRef} args={[null, null, BELT_COUNT]}>
-        <dodecahedronGeometry args={[1, 0]} />
-        <meshStandardMaterial color="#9a9187" emissive="#6a635b" emissiveIntensity={0.18} roughness={0.95} metalness={0.05} />
+      <instancedMesh ref={meshRef} args={[null, null, BELT_COUNT]} material={material}>
+        <dodecahedronGeometry args={[1, 1]} />
       </instancedMesh>
     </group>
   );
 }
 
-// ── Fresnel atmosphere glow (two layers: tight rim + wide soft halo) ──────────
-// `baseIntensity` scales both layers — set per planet from REAL_PLANET_ATMOSPHERES.
-// Hover/select bumps are small so the atmosphere never drowns the surface texture.
-function AtmosphereGlow({ size, color, baseIntensity = 1.0, isHovered, isSelected }) {
-  // Inner tight rim — sharp falloff, sits right on the planet limb
-  const innerMaterial = useMemo(() => new THREE.ShaderMaterial({
+// ── Soft glow shell (planet atmospheres + the Sun's corona) ──────────────────
+// A sphere `shell`× the body radius, shaded by how close each pixel's sight
+// line passes to the body centre (b, in body radii): full strength at the
+// limb (b = 1), easing to exactly zero at the shell silhouette (b = shell).
+// A plain fresnel term peaks AT the silhouette instead, which cut the glow
+// off with a hard visible ring. Over the body's own disc only a thin limb rim
+// survives (`core` scales how much bleeds onto the face).
+const GLOW_VERT = `
+  varying vec3 vNormal;
+  varying vec3 vViewDir;
+  void main() {
+    vNormal = normalize(normalMatrix * normal);
+    vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+    vViewDir = normalize(-mvPos.xyz);
+    gl_Position = projectionMatrix * mvPos;
+  }
+`;
+const GLOW_FRAG = `
+  uniform vec3  uColor;
+  uniform float uIntensity;
+  uniform float uShell;
+  uniform float uPower;
+  uniform float uCore;
+  varying vec3  vNormal;
+  varying vec3  vViewDir;
+  void main() {
+    float d = clamp(dot(normalize(vNormal), normalize(vViewDir)), 0.0, 1.0);
+    float b = sqrt(1.0 - d * d) * uShell;
+    float t = clamp((b - 1.0) / (uShell - 1.0), 0.0, 1.0);
+    float glow = pow(1.0 - t, uPower) * mix(uCore, 1.0, smoothstep(0.82, 1.0, b));
+    gl_FragColor = vec4(uColor, glow * uIntensity);
+  }
+`;
+function makeGlowMaterial({ color, intensity, shell, power, core = 0 }) {
+  return new THREE.ShaderMaterial({
     uniforms: {
       uColor:     { value: new THREE.Color(color) },
-      uIntensity: { value: 0.7 * baseIntensity },
-      uPower:     { value: 3.2 },
+      uIntensity: { value: intensity },
+      uShell:     { value: shell },
+      uPower:     { value: power },
+      uCore:      { value: core },
     },
-    vertexShader: `
-      varying vec3 vNormal;
-      varying vec3 vViewDir;
-      void main() {
-        vNormal   = normalize(normalMatrix * normal);
-        vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
-        vViewDir  = normalize(-mvPos.xyz);
-        gl_Position = projectionMatrix * mvPos;
-      }
-    `,
-    fragmentShader: `
-      uniform vec3  uColor;
-      uniform float uIntensity;
-      uniform float uPower;
-      varying vec3  vNormal;
-      varying vec3  vViewDir;
-      void main() {
-        float fresnel = pow(1.0 - max(dot(vNormal, vViewDir), 0.0), uPower);
-        gl_FragColor  = vec4(uColor * 1.6, fresnel * uIntensity);
-      }
-    `,
+    vertexShader: GLOW_VERT,
+    fragmentShader: GLOW_FRAG,
     transparent: true,
     depthWrite:  false,
     blending:    THREE.AdditiveBlending,
-    side:        THREE.FrontSide,
-  }), [color, baseIntensity]);
+  });
+}
 
-  // Outer wide halo — gentle falloff, extends ~2x planet radius into space
-  const outerMaterial = useMemo(() => new THREE.ShaderMaterial({
-    uniforms: {
-      uColor:     { value: new THREE.Color(color) },
-      uIntensity: { value: 0.28 * baseIntensity },
-    },
-    vertexShader: `
-      varying vec3 vNormal;
-      varying vec3 vViewDir;
-      void main() {
-        vNormal   = normalize(normalMatrix * normal);
-        vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
-        vViewDir  = normalize(-mvPos.xyz);
-        gl_Position = projectionMatrix * mvPos;
-      }
-    `,
-    fragmentShader: `
-      uniform vec3  uColor;
-      uniform float uIntensity;
-      varying vec3  vNormal;
-      varying vec3  vViewDir;
-      void main() {
-        // Wider, gentler falloff — reads as scattered light, not a rim
-        float f = pow(1.0 - max(dot(vNormal, vViewDir), 0.0), 1.8);
-        gl_FragColor = vec4(uColor * 1.1, f * uIntensity * 0.7);
-      }
-    `,
-    transparent: true,
-    depthWrite:  false,
-    blending:    THREE.AdditiveBlending,
-    side:        THREE.FrontSide,
+const RIM_SHELL  = 1.12;
+const HALO_SHELL = 1.7;
+
+// Two layers: a tight rim on the limb + a wide soft halo. `baseIntensity`
+// scales both — set per planet from REAL_PLANET_ATMOSPHERES. Hover/select
+// bumps are small so the atmosphere never drowns the surface texture.
+function AtmosphereGlow({ size, color, baseIntensity = 1.0, isHovered, isSelected }) {
+  const innerMaterial = useMemo(() => makeGlowMaterial({
+    color, intensity: 0.6 * baseIntensity, shell: RIM_SHELL, power: 1.6,
+  }), [color, baseIntensity]);
+  const outerMaterial = useMemo(() => makeGlowMaterial({
+    color, intensity: 0.22 * baseIntensity, shell: HALO_SHELL, power: 2.6,
   }), [color, baseIntensity]);
 
   useFrame((_, delta) => {
-    // Subtle hover/select bumps — atmosphere stays restrained so the surface
-    // texture remains the focal point (per user feedback).
-    const targetInner = (isSelected ? 1.4 : isHovered ? 1.1 : 0.7) * baseIntensity;
-    const targetOuter = (isSelected ? 0.55 : isHovered ? 0.40 : 0.28) * baseIntensity;
+    const targetInner = (isSelected ? 1.0 : isHovered ? 0.8 : 0.6) * baseIntensity;
+    const targetOuter = (isSelected ? 0.4 : isHovered ? 0.32 : 0.22) * baseIntensity;
     innerMaterial.uniforms.uIntensity.value +=
       (targetInner - innerMaterial.uniforms.uIntensity.value) * 6 * delta;
     outerMaterial.uniforms.uIntensity.value +=
@@ -496,13 +508,11 @@ function AtmosphereGlow({ size, color, baseIntensity = 1.0, isHovered, isSelecte
 
   return (
     <>
-      {/* Tight rim — sits just above the planet limb */}
-      <mesh scale={1.14}>
+      <mesh scale={RIM_SHELL}>
         <sphereGeometry args={[size, ATMO_SEGS, ATMO_SEGS]} />
         <primitive object={innerMaterial} attach="material" />
       </mesh>
-      {/* Wide soft halo — scattered-light feel, much tighter than before */}
-      <mesh scale={1.45}>
+      <mesh scale={HALO_SHELL}>
         <sphereGeometry args={[size, ATMO_SEGS, ATMO_SEGS]} />
         <primitive object={outerMaterial} attach="material" />
       </mesh>
@@ -569,7 +579,10 @@ function Stars({ count = 900 }) {
 // ── Orbital ring ──────────────────────────────────────────────────────────────
 // Two-pass: bright thin core + wider soft glow underneath, both colored to
 // match the orbiting planet so the path reads against the nebula.
-function OrbitalRing({ radius, color }) {
+// Kept faint at rest so six saturated circles don't compete with the planets;
+// a hovered planet's ring lifts to trace its path (not once focused — up
+// close the bright line just slices across the planet).
+function OrbitalRing({ radius, color, highlight }) {
   const points = useMemo(() => {
     const n = 192;
     return Array.from({ length: n + 1 }, (_, i) => {
@@ -580,16 +593,19 @@ function OrbitalRing({ radius, color }) {
   return (
     <>
       {/* Soft glow */}
-      <Line points={points} color={color} lineWidth={3} transparent opacity={0.10} depthWrite={false} />
-      {/* Bright core */}
-      <Line points={points} color={color} lineWidth={0.8} transparent opacity={0.32} depthWrite={false} />
+      <Line points={points} color={color} lineWidth={3} transparent opacity={highlight ? 0.10 : 0.04} depthWrite={false} />
+      {/* Core */}
+      <Line points={points} color={color} lineWidth={0.8} transparent opacity={highlight ? 0.42 : 0.17} depthWrite={false} />
     </>
   );
 }
 
 // ── Sun ───────────────────────────────────────────────────────────────────────
-function Sun({ node, isSelected, isHovered, onClick, onHover, hideLabel, onMeshReady }) {
-  const meshRef  = useRef();
+const CORONA_SHELL = 2.1;
+const CORONA_BASE  = 0.6;
+
+function Sun({ node, isSelected, isHovered, onClick, onHover, hideLabel, dimLabel, onMeshReady, bodyRef, occluders }) {
+  const meshRef  = bodyRef;
 
   const { size } = node;
   const FIRE = '#ffaa33'; // warm amber used for all glow/corona
@@ -597,43 +613,21 @@ function Sun({ node, isSelected, isHovered, onClick, onHover, hideLabel, onMeshR
   // Real photographic Sun surface (Solar System Scope, CC-BY 4.0).
   const sunTexture = useMemo(() => loadCachedTexture(SUN_URL), []);
 
-  const coronaMaterial = useMemo(() => new THREE.ShaderMaterial({
-    uniforms: {
-      uColor:     { value: new THREE.Color(FIRE) },
-      uIntensity: { value: 1.2 },
-    },
-    vertexShader: `
-      varying vec3 vNormal; varying vec3 vViewDir;
-      void main() {
-        vNormal = normalize(normalMatrix * normal);
-        vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        vViewDir = normalize(-mv.xyz);
-        gl_Position = projectionMatrix * mv;
-      }
-    `,
-    fragmentShader: `
-      uniform vec3 uColor; uniform float uIntensity;
-      varying vec3 vNormal; varying vec3 vViewDir;
-      void main() {
-        float f = pow(1.0 - max(dot(vNormal, vViewDir), 0.0), 2.8);
-        gl_FragColor = vec4(uColor * 1.4, f * uIntensity);
-      }
-    `,
-    transparent: true, depthWrite: false,
-    blending: THREE.AdditiveBlending, side: THREE.FrontSide,
+  const coronaMaterial = useMemo(() => makeGlowMaterial({
+    color: FIRE, intensity: CORONA_BASE, shell: CORONA_SHELL, power: 2.6,
   }), []);
 
   useFrame((_, delta) => {
     if (meshRef.current) meshRef.current.rotation.y += delta * 0.05;
-    const target = isHovered || isSelected ? 1.8 : 1.2;
+    const target = isHovered || isSelected ? CORONA_BASE * 1.4 : CORONA_BASE;
     coronaMaterial.uniforms.uIntensity.value +=
       (target - coronaMaterial.uniforms.uIntensity.value) * 4 * delta;
   });
 
   return (
     <group>
-      {/* Fresnel corona — tight, subtle glow around the sun limb */}
-      <mesh scale={1.45}>
+      {/* Corona — soft glow fading out to nothing at CORONA_SHELL× the radius */}
+      <mesh scale={CORONA_SHELL}>
         <sphereGeometry args={[size, ATMO_SEGS, ATMO_SEGS]} />
         <primitive object={coronaMaterial} attach="material" />
       </mesh>
@@ -657,19 +651,9 @@ function Sun({ node, isSelected, isHovered, onClick, onHover, hideLabel, onMeshR
       </mesh>
       <pointLight color="#ffcc88" intensity={5.5} distance={65} decay={1.5} />
       {!hideLabel && (
-        <group position={[0, -(size + 0.9), 0]}>
-          <Html center zIndexRange={[9, 0]} style={{ pointerEvents: 'none', userSelect: 'none' }}>
-            <span style={{
-              color: FIRE,
-              fontSize: '10px',
-              fontFamily: 'monospace',
-              whiteSpace: 'nowrap',
-              letterSpacing: '0.06em',
-              fontWeight: isSelected ? 700 : 500,
-              textShadow: '0 1px 4px #000, 0 0 10px #000',
-            }}>{node.label}</span>
-          </Html>
-        </group>
+        <BodyLabel text={node.label} offsetY={-(size + 0.9)} color={FIRE}
+          isSelected={false} isHovered={false} weight={isSelected ? 700 : 500}
+          occluders={occluders} dimmed={dimLabel} />
       )}
     </group>
   );
@@ -682,6 +666,9 @@ function Moon({ parentSize }) {
   const angleRef = useRef(Math.random() * Math.PI * 2);
   const tilt = useMemo(() => Math.PI / 7, []);
   const orbitR = parentSize * 1.9;
+  // cratered Mercury art, self-lit like the planets — untextured and lit only
+  // by the far-off Sun it read as a flat grey disc whenever it passed in front
+  const texture = useMemo(() => loadCachedTexture(REAL_PLANET_TEXTURES.mercury), []);
   useFrame((_, delta) => {
     angleRef.current += delta * 0.55;
     const x = Math.sin(angleRef.current) * orbitR;
@@ -694,42 +681,66 @@ function Moon({ parentSize }) {
   return (
     <group ref={groupRef} rotation={[tilt, 0, 0]}>
       <mesh ref={meshRef}>
-        <sphereGeometry args={[parentSize * 0.18, 16, 16]} />
-        <meshStandardMaterial color="#c8c2b8" roughness={0.95} metalness={0.02} />
+        <sphereGeometry args={[parentSize * 0.18, 24, 24]} />
+        <meshStandardMaterial map={texture} color="#d8d2c8" emissive="#ffffff" emissiveMap={texture}
+          emissiveIntensity={0.35} roughness={0.95} metalness={0.02} />
       </mesh>
     </group>
   );
 }
 
-// ── Distance-aware planet label ───────────────────────────────────────────────
-// Smoothly fades the label based on camera distance to the planet so that
-// labels in the foreground stay legible while distant labels recede instead
-// of overlapping each other in a wall of text.
-function PlanetLabel({ node, size, color, isHovered, isSelected }) {
+// ── Body label ────────────────────────────────────────────────────────────────
+// HTML labels always draw on top of the canvas, so without help a label on the
+// far side of the system bleeds through the Sun or a zoomed-in planet. Each
+// label raycasts against the OTHER bodies' surface meshes (`occluders`; its own
+// body is excluded — from above, the ray to a label hung below a planet passes
+// through that planet) and fades out while hidden. `dimmed` fades it too —
+// used to declutter everything except the focused planet.
+function BodyLabel({ text, offsetY, color, isHovered, isSelected, occluders, dimmed, weight }) {
+  const [occluded, setOccluded] = useState(false);
+  const hidden = occluded || dimmed;
   return (
-    <group position={[0, -(size + 0.52), 0]}>
-      <Html center zIndexRange={[9, 0]} style={{ pointerEvents: 'none', userSelect: 'none' }}>
-        <span style={{
-          color: isSelected || isHovered ? '#fff' : color,
-          fontSize: '10px',
-          fontFamily: 'monospace',
-          whiteSpace: 'nowrap',
-          letterSpacing: '0.06em',
-          fontWeight: isSelected ? 600 : 400,
-          textShadow: '0 1px 6px #000, 0 0 12px #000',
-          transition: 'color 0.2s ease',
-        }}>
-          {node.label}
-        </span>
+    <group position={[0, offsetY, 0]}>
+      <Html center zIndexRange={[9, 0]} occlude={occluders} onOcclude={setOccluded}
+        style={{ pointerEvents: 'none', userSelect: 'none' }}>
+        <SceneLabel text={text} color={color} active={isSelected || isHovered}
+          weight={weight ?? (isSelected ? 600 : 500)} hidden={hidden} />
       </Html>
     </group>
   );
 }
 
+// Shared look for every in-scene label (planets, Sun, ship): readable Inter
+// text with the body's colour carried by a small dot, instead of 10px
+// coloured browser-default monospace.
+function SceneLabel({ text, color, active, weight = 500, hidden = false }) {
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: '6px',
+      color: active ? '#fff' : 'rgba(229,231,235,0.82)',
+      fontFamily: "'Inter', system-ui, sans-serif",
+      fontSize: '12px',
+      fontWeight: weight,
+      letterSpacing: '0.01em',
+      whiteSpace: 'nowrap',
+      textShadow: '0 1px 3px #000, 0 0 10px rgba(0,0,0,0.9)',
+      opacity: hidden ? 0 : 1,
+      transition: 'color 0.2s ease, opacity 0.25s ease',
+    }}>
+      <span style={{
+        width: 6, height: 6, borderRadius: 9999, background: color, flexShrink: 0,
+        boxShadow: `0 0 ${active ? 8 : 4}px ${color}`,
+      }} />
+      {text}
+    </span>
+  );
+}
+
 // ── Planet ────────────────────────────────────────────────────────────────────
-function Planet({ node, isSelected, isHovered, onClick, onHover, hideLabel, onPositionUpdate, onProjectSelect }) {
+function Planet({ node, isSelected, isHovered, onClick, onHover, hideLabel, dimLabel, onPositionUpdate, onProjectSelect, bodyRef, occluders }) {
+  const viewportWidth = useThree((state) => state.size.width);
   const groupRef = useRef();
-  const meshRef  = useRef();
+  const meshRef  = bodyRef;
   const cloudRef = useRef();
   const angleRef = useRef(node.orbitOffset);
   const scaleVec = useMemo(() => new THREE.Vector3(1, 1, 1), []);
@@ -776,7 +787,7 @@ function Planet({ node, isSelected, isHovered, onClick, onHover, hideLabel, onPo
   // Compute tangent direction (perpendicular to orbit radius) when selection state changes
   // This gives us the "screen left/right" direction for positioning the floating signs
   const isHub   = node.content?.type === 'projects_hub';
-  const showSigns = isSelected && isHub && !IS_MOBILE;
+  const showSigns = isSelected && isHub && !IS_MOBILE && viewportWidth >= 768;
 
   const signTangent = useMemo(() => ({
     x: Math.cos(angleRef.current),
@@ -895,14 +906,16 @@ function Planet({ node, isSelected, isHovered, onClick, onHover, hideLabel, onPo
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
 
-      {/* Label below planet — distance-faded via direct DOM ref */}
+      {/* Label below planet — hidden behind other bodies, dimmed when another planet has focus */}
       {!hideLabel && (
-        <PlanetLabel
-          node={node}
-          size={size}
+        <BodyLabel
+          text={node.label}
+          offsetY={-(size + 0.52)}
           color={color}
           isHovered={isHovered}
           isSelected={isSelected}
+          occluders={occluders}
+          dimmed={dimLabel}
         />
       )}
 
@@ -925,94 +938,145 @@ function Planet({ node, isSelected, isHovered, onClick, onHover, hideLabel, onPo
             <meshBasicMaterial transparent opacity={0} depthWrite={false} />
           </mesh>
 
-          {/* Personal sign — tangent left */}
-          <group position={[-signTangent.x * 2.4, 0.35, -signTangent.z * 2.4]}>
-            <Html center zIndexRange={[10, 0]} style={{ pointerEvents: 'auto' }}>
-              <motion.button
-                className="lg-surface lg-card lg-tint-purple"
-                initial={{ opacity: 0, scale: 0.75, y: 12 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                transition={{ type: 'spring', delay: 0.05, stiffness: 380, damping: 28 }}
-                whileHover={{ scale: 1.07 }}
-                whileTap={{ scale: 0.96 }}
-                onPointerDown={(e) => { e.stopPropagation(); e.nativeEvent?.stopPropagation(); }}
-                onClick={(e) => { e.stopPropagation(); e.nativeEvent?.stopPropagation(); onProjectSelect('personal'); }}
-                style={{
-                  padding: '14px 22px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: '5px',
-                  minWidth: '130px',
-                }}
-              >
-                <Code2 size={22} strokeWidth={1.75} color="#c4b5fd" />
-                <span style={{ color: '#c4b5fd', fontFamily: 'monospace', fontSize: '13px', fontWeight: 600, letterSpacing: '0.04em' }}>Personal</span>
-                <span style={{ color: 'rgba(196,181,253,0.55)', fontFamily: 'monospace', fontSize: '10px' }}>Side projects</span>
-              </motion.button>
-            </Html>
-          </group>
-
-          {/* Work sign — tangent right */}
-          <group position={[signTangent.x * 2.4, 0.35, signTangent.z * 2.4]}>
-            <Html center zIndexRange={[10, 0]} style={{ pointerEvents: 'auto' }}>
-              <motion.button
-                className="lg-surface lg-card lg-tint-blue"
-                initial={{ opacity: 0, scale: 0.75, y: 12 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                transition={{ type: 'spring', delay: 0.12, stiffness: 380, damping: 28 }}
-                whileHover={{ scale: 1.07 }}
-                whileTap={{ scale: 0.96 }}
-                onPointerDown={(e) => { e.stopPropagation(); e.nativeEvent?.stopPropagation(); }}
-                onClick={(e) => { e.stopPropagation(); e.nativeEvent?.stopPropagation(); onProjectSelect('work'); }}
-                style={{
-                  padding: '14px 22px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: '5px',
-                  minWidth: '130px',
-                }}
-              >
-                <Building2 size={22} strokeWidth={1.75} color="#93c5fd" />
-                <span style={{ color: '#93c5fd', fontFamily: 'monospace', fontSize: '13px', fontWeight: 600, letterSpacing: '0.04em' }}>Work</span>
-                <span style={{ color: 'rgba(147,197,253,0.55)', fontFamily: 'monospace', fontSize: '10px' }}>Swisscom apps</span>
-              </motion.button>
-            </Html>
-          </group>
+          <ProjectSign side={-1} tangent={signTangent} delay={0.05} tint="lg-tint-purple" color="#c4b5fd"
+            Icon={Code2} title="Personal" caption="Side projects" onSelect={() => onProjectSelect('personal')} />
+          <ProjectSign side={1} tangent={signTangent} delay={0.12} tint="lg-tint-blue" color="#93c5fd"
+            Icon={Building2} title="Work" caption="Swisscom apps" onSelect={() => onProjectSelect('work')} />
         </>
       )}
     </group>
   );
 }
 
+// Floating Personal / Work sign beside the Projects planet (desktop only —
+// phones get the 2D buttons App renders instead).
+function ProjectSign({ side, tangent, delay, tint, color, Icon, title, caption, onSelect }) {
+  return (
+    <group position={[side * tangent.x * 2.4, 0.35, side * tangent.z * 2.4]}>
+      <Html center zIndexRange={[10, 0]} style={{ pointerEvents: 'auto' }}>
+        <motion.button
+          className={`lg-surface lg-card ${tint} flex flex-col items-center gap-1 min-w-[136px] px-6 py-3.5 cursor-pointer`}
+          initial={{ opacity: 0, scale: 0.75, y: 12 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          transition={{ type: 'spring', delay, stiffness: 380, damping: 28 }}
+          whileHover={{ scale: 1.06 }}
+          whileTap={{ scale: 0.96 }}
+          onPointerDown={(e) => { e.stopPropagation(); e.nativeEvent?.stopPropagation(); }}
+          onClick={(e) => { e.stopPropagation(); e.nativeEvent?.stopPropagation(); onSelect(); }}
+        >
+          <Icon size={20} strokeWidth={1.75} color={color} />
+          <span className="text-[14px] font-semibold tracking-tight" style={{ color }}>{title}</span>
+          <span className="text-[11px] text-gray-400">{caption}</span>
+        </motion.button>
+      </Html>
+    </group>
+  );
+}
+
+// ── Camera framing ────────────────────────────────────────────────────────────
+// Home view: close enough that the system (outer orbit 23.5, ship 27) fills
+// most of a landscape frame. Narrow/portrait screens back off proportionally.
+// Looking slightly below the Sun lifts the system clear of the hero text + HUD.
+const HOME_CAM  = new THREE.Vector3(0, 19, 43);
+const HOME_LOOK = new THREE.Vector3(0, -2.5, 0);
+// Portrait screens also tilt toward top-down: the system is width-limited
+// there, and a flat 24° view squeezed every orbit into a thin band where the
+// labels piled on top of each other. Landscape framing is unchanged.
+const HOME_DIST = HOME_CAM.length();
+const HOME_ELEV = Math.atan2(HOME_CAM.y, HOME_CAM.z);
+// The taller ellipse also reaches further down the screen, so portrait aims
+// lower too — lifting the system clear of the hero text.
+const portraitBlend = (aspect) => Math.min(1, Math.max(0, (1 - aspect) / 0.5));
+function homeCameraPos(aspect, out = new THREE.Vector3()) {
+  const framingScale = Math.max(1, 1.3 / Math.max(aspect, 0.25));
+  const elev = HOME_ELEV + portraitBlend(aspect) * 0.32;
+  return out.set(0, Math.sin(elev), Math.cos(elev)).multiplyScalar(HOME_DIST * framingScale);
+}
+function homeCameraLook(aspect, out = new THREE.Vector3()) {
+  return out.copy(HOME_LOOK).setY(HOME_LOOK.y - portraitBlend(aspect) * 7.5);
+}
+
+// Focus view: distance scales with the body (a fixed distance made Skills fill
+// the screen and the small rocky planets look far away). Approach from the
+// side rather than straight from outside the orbit — head-on, the Sun sat
+// directly behind the planet and its bloom flooded the card. A negative angle
+// puts the Sun on the LEFT of the frame, away from the content panel.
+// Inner planets swing further round (up to ~72°): at a small angle the Sun
+// sits only a few units behind them and its disc + corona overlapped the
+// planet (Contact, Skills). Outer planets keep the gentle 0.5 rad.
+function focusSideAngle(node) {
+  const inner = Math.min(1, Math.max(0, (13 - node.orbitRadius) / 9));
+  return -(0.5 + 0.75 * inner);
+}
+const _up = new THREE.Vector3(0, 1, 0);
+// The Sun is viewed from well above the ecliptic: from a low angle the camera
+// sat outside Contact's orbit (r 4), so that planet swept across the Sun every
+// ~12s. At ~43°, aimed a little above the Sun, the near side of its orbit
+// falls below the frame.
+const SUN_FOCUS_ELEV = 0.75;
+const SUN_FOCUS_AIM_Y = 1.0;
+function focusDistance(node) {
+  if (node.isSun) return 7.4;
+  const r = node.size * (node.hasRing ? 1.6 : 1);
+  return (r * 2.9 + 2.4) * (IS_MOBILE ? 1.45 : 1);
+}
+
+// While a content card is open on wide screens, shift the projection centre
+// so the focused body sits in the free area left of the 440px panel instead
+// of hiding behind it. setViewOffset keeps raycasts + <Html> projection in
+// sync because both go through the camera's projection matrix.
+const CARD_PANEL_PX = 452; // max-w-[440px] + 12px gutter (NodeCard)
+function CardViewOffset({ active }) {
+  const camera = useThree((s) => s.camera);
+  const size   = useThree((s) => s.size);
+  const cur    = useRef(0);
+  useFrame((_, delta) => {
+    const target = active && size.width >= 768 ? CARD_PANEL_PX / 2 : 0;
+    cur.current += (target - cur.current) * Math.min(1, delta * 5);
+    if (target === 0 && Math.abs(cur.current) < 0.5) {
+      cur.current = 0;
+      if (camera.view?.enabled) camera.clearViewOffset();
+      return;
+    }
+    camera.setViewOffset(size.width, size.height, cur.current, 0, size.width, size.height);
+  });
+  return null;
+}
+
 // ── Camera controller ─────────────────────────────────────────────────────────
 function CameraController({ selectedId, posRef, orbitRef }) {
   const { camera } = useThree();
-  const prevRef    = useRef(null);
+  const size       = useThree((s) => s.size);
+  // undefined ≠ null: the first frame always frames the home view, so coming
+  // back from the cockpit glides out instead of starting at the ship's seat
+  const prevRef    = useRef(undefined);
+  const aspectRef  = useRef(null);
   const animating  = useRef(false);
   const targetPos  = useRef(new THREE.Vector3(0, 12, 24));
   const targetLook = useRef(new THREE.Vector3(0, 0, 0));
-  const defaultPos  = useMemo(() => new THREE.Vector3(0, 26, 56), []);
-  const defaultLook = useMemo(() => new THREE.Vector3(0, 0, 0), []);
   const tmpDir      = useMemo(() => new THREE.Vector3(), []);
+  const nodeMap     = useMemo(() => Object.fromEntries(NODES.map((n) => [n.id, n])), []);
 
   useFrame((_, delta) => {
-    if (selectedId !== prevRef.current) {
+    const aspect = size.width / size.height;
+    if (selectedId !== prevRef.current || (!selectedId && aspect !== aspectRef.current)) {
       prevRef.current = selectedId;
-      if (selectedId) {
+      aspectRef.current = aspect;
+      const node = selectedId && nodeMap[selectedId];
+      if (node) {
         const p    = posRef.current[selectedId] || { x: 0, y: 0, z: 0 };
-        const isSun = selectedId === 'about';
-        const dist  = isSun ? 3.5 : (IS_MOBILE ? 6.5 : 4.8);
-        if (isSun) { tmpDir.set(0, 0, 1); }
-        else       { tmpDir.set(p.x, 0, p.z).normalize(); }
-        targetPos.current.set(p.x + tmpDir.x * dist, p.y + 1.9, p.z + tmpDir.z * dist);
-        targetLook.current.set(p.x, p.y, p.z);
+        const dist = focusDistance(node);
+        if (node.isSun) {
+          targetPos.current.set(0, Math.sin(SUN_FOCUS_ELEV) * dist, Math.cos(SUN_FOCUS_ELEV) * dist);
+          targetLook.current.set(0, SUN_FOCUS_AIM_Y, 0);
+        } else {
+          tmpDir.set(p.x, 0, p.z).normalize().applyAxisAngle(_up, focusSideAngle(node));
+          targetPos.current.set(p.x + tmpDir.x * dist, p.y + dist * 0.36, p.z + tmpDir.z * dist);
+          targetLook.current.set(p.x, p.y, p.z);
+        }
       } else {
-        targetPos.current.copy(defaultPos);
-        targetLook.current.copy(defaultLook);
+        homeCameraPos(size.width / size.height, targetPos.current);
+        homeCameraLook(size.width / size.height, targetLook.current);
       }
       animating.current = true;
       if (orbitRef.current) orbitRef.current.enabled = false;
@@ -1201,10 +1265,10 @@ function GestureRaycaster({ gestureDataRef, gesture, onHover, onSelect, onDwellP
 // ── Fallback + loader ─────────────────────────────────────────────────────────
 function WebGLFallback() {
   return (
-    <div className="flex items-center justify-center h-full text-center p-8">
+    <div role="status" className="flex items-center justify-center h-full text-center p-8">
       <div><Globe size={42} strokeWidth={1.5} className="mb-4 mx-auto text-gray-400" />
-        <h2 className="text-xl font-semibold text-white mb-2">WebGL not available</h2>
-        <p className="text-gray-400 text-sm">Try a modern browser like Chrome or Firefox.</p>
+        <h2 className="text-xl font-semibold text-white mb-2">3D preview unavailable</h2>
+        <p className="text-gray-400 text-sm">Your browser could not start the 3D scene.</p>
       </div>
     </div>
   );
@@ -1223,6 +1287,7 @@ function SceneLoader() {
 // ── Scene content ─────────────────────────────────────────────────────────────
 function SceneContent({ onNodeSelect, onPlanetSelect, onProjectSelect, onEnterCockpit, selectedPlanetId,
   gestureMode, gestureDataRef, gesture, onDwellProgress, cardOpen, onSunReady }) {
+  const viewportSize = useThree((state) => state.size);
   const [hoveredId, setHoveredId] = useState(null);
   const selectedId = selectedPlanetId; // controlled externally by App
   const orbitRef = useRef();
@@ -1237,7 +1302,8 @@ function SceneContent({ onNodeSelect, onPlanetSelect, onProjectSelect, onEnterCo
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     window.__orbit = orbitRef;
-    return () => { delete window.__orbit; };
+    window.__homeCam = () => ({ pos: homeCameraPos(window.innerWidth / window.innerHeight).toArray(), look: homeCameraLook(window.innerWidth / window.innerHeight).toArray() });
+    return () => { delete window.__orbit; delete window.__homeCam; };
   }, []);
 
   // Auto-rotate idle behavior: pause on interaction, resume after 5s idle.
@@ -1295,6 +1361,13 @@ function SceneContent({ onNodeSelect, onPlanetSelect, onProjectSelect, onEnterCo
   const sunNode     = NODES.find((n) => n.isSun);
   const planetNodes = NODES.filter((n) => !n.isSun);
 
+  // Surface-mesh ref per body; each label occludes against every body but its own.
+  const bodyRefs = useMemo(() => Object.fromEntries(NODES.map((n) => [n.id, createRef()])), []);
+  const occludersFor = useMemo(() => Object.fromEntries(NODES.map((n) => [
+    n.id, NODES.filter((m) => m.id !== n.id).map((m) => bodyRefs[m.id]),
+  ])), [bodyRefs]);
+  const labelsHidden = cardOpen || mode !== 'solar';
+
   return (
     <>
       {/* Soft fill from above — gives planets sculpted shading instead of pure sun-side glare */}
@@ -1304,17 +1377,20 @@ function SceneContent({ onNodeSelect, onPlanetSelect, onProjectSelect, onEnterCo
       <Stars count={STAR_COUNT} />
       <AsteroidBelt />
       <Suspense fallback={null}>
-        <PlayerShip onBoard={onEnterCockpit} />
+        <PlayerShip onBoard={onEnterCockpit} hideLabel={labelsHidden || !!selectedId} />
       </Suspense>
       {!IS_MOBILE && <ShootingStars />}
 
       {planetNodes.map((n) => (
-        <OrbitalRing key={`ring-${n.id}`} radius={n.orbitRadius} color={n.color} />
+        <OrbitalRing key={`ring-${n.id}`} radius={n.orbitRadius} color={n.color}
+          highlight={hoveredId === n.id && selectedId !== n.id} />
       ))}
 
       {sunNode && (
         <Sun node={sunNode} isSelected={selectedId === sunNode.id} isHovered={hoveredId === sunNode.id}
-          onClick={handleSelect} onHover={setHoveredId} hideLabel={cardOpen || mode !== 'solar'}
+          onClick={handleSelect} onHover={setHoveredId} hideLabel={labelsHidden}
+          dimLabel={!!selectedId && selectedId !== sunNode.id}
+          bodyRef={bodyRefs[sunNode.id]} occluders={occludersFor[sunNode.id]}
           onMeshReady={onSunReady} />
       )}
 
@@ -1322,11 +1398,15 @@ function SceneContent({ onNodeSelect, onPlanetSelect, onProjectSelect, onEnterCo
         <Planet key={n.id} node={n}
           isSelected={selectedId === n.id} isHovered={hoveredId === n.id}
           onClick={handleSelect} onHover={setHoveredId}
-          hideLabel={cardOpen || mode !== 'solar'}
+          hideLabel={labelsHidden}
+          dimLabel={!!selectedId && selectedId !== n.id}
+          bodyRef={bodyRefs[n.id]} occluders={occludersFor[n.id]}
           onPositionUpdate={handlePositionUpdate}
           onProjectSelect={n.content?.type === 'projects_hub' ? onProjectSelect : undefined}
         />
       ))}
+
+      <CardViewOffset active={cardOpen} />
 
       <Cockpit posRef={posRef} onEngage={handleSelect} />
 
@@ -1335,7 +1415,7 @@ function SceneContent({ onNodeSelect, onPlanetSelect, onProjectSelect, onEnterCo
       )}
 
       <OrbitControls ref={orbitRef} enablePan={false} enableZoom zoomSpeed={0.7} rotateSpeed={0.45}
-        minDistance={3} maxDistance={70} enabled={mode === 'solar' && !gestureMode} makeDefault
+        minDistance={3} maxDistance={Math.max(70, homeCameraPos(viewportSize.width / viewportSize.height).length() + 15)} enabled={mode === 'solar' && !gestureMode} makeDefault
         autoRotate={mode === 'solar'} autoRotateSpeed={0.35} />
 
       {gestureMode && mode === 'solar' && !cardOpen && !selectedId && <GestureCamera gestureDataRef={gestureDataRef} />}
@@ -1349,8 +1429,8 @@ function SceneContent({ onNodeSelect, onPlanetSelect, onProjectSelect, onEnterCo
 }
 
 // ── Public component ──────────────────────────────────────────────────────────
-export default function Scene3D({ onNodeSelect, onPlanetSelect, onProjectSelect, onEnterCockpit, onDeselect, selectedPlanetId, gestureMode, gestureDataRef, gesture, onDwellProgress, cardOpen }) {
-  const [webglSupported, setWebglSupported] = useState(true);
+export default function Scene3D({ onNodeSelect, onPlanetSelect, onProjectSelect, onEnterCockpit, onDeselect, selectedPlanetId, gestureMode, gestureDataRef, gesture, onDwellProgress, cardOpen, onUnavailable }) {
+  const [webglSupported, setWebglSupported] = useState(null);
   const [ready, setReady] = useState(false);
   // Adaptive resolution: start at native DPR (capped at 2). If the GPU can't
   // hold the framerate (weak work laptops), PerformanceMonitor steps the
@@ -1360,6 +1440,9 @@ export default function Scene3D({ onNodeSelect, onPlanetSelect, onProjectSelect,
     if (typeof window === 'undefined') return 1;
     return Math.min(window.devicePixelRatio, IS_MOBILE ? 1.5 : 2);
   }, []);
+  const initialCam = useMemo(() => (typeof window === 'undefined'
+    ? HOME_CAM.toArray()
+    : homeCameraPos(window.innerWidth / window.innerHeight).toArray()), []);
   const [dpr, setDpr] = useState(maxDpr);
   // Pause rendering when the tab is hidden — saves battery + heat.
   const [visible, setVisible] = useState(
@@ -1377,19 +1460,24 @@ export default function Scene3D({ onNodeSelect, onPlanetSelect, onProjectSelect,
   }, []);
 
   useEffect(() => {
+    let supported = false;
     try {
       const canvas = document.createElement('canvas');
-      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-      if (!gl) setWebglSupported(false);
-    } catch { setWebglSupported(false); }
-  }, []);
+      const context = canvas.getContext('webgl2');
+      supported = !!context;
+      context?.getExtension('WEBGL_lose_context')?.loseContext();
+    } catch { supported = false; }
+    setWebglSupported(supported);
+    if (!supported) onUnavailable?.();
+  }, [onUnavailable]);
 
+  if (webglSupported === null) return <SceneLoader />;
   if (!webglSupported) return <WebGLFallback />;
 
   return (
     <div className="w-full h-full relative">
       {!ready && <SceneLoader />}
-      <Canvas camera={{ position: [0, 26, 56], fov: 55 }} style={{ background: 'transparent' }}
+      <Canvas camera={{ position: initialCam, fov: 55 }} style={{ background: 'transparent' }}
         dpr={dpr} frameloop={visible ? 'always' : 'never'}
         gl={{ antialias: !IS_MOBILE, alpha: true, powerPreference: 'high-performance' }}
         onCreated={({ gl }) => {

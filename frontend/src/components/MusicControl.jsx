@@ -77,7 +77,7 @@ export default function MusicControl({ focusedCategory }) {
     <button
       onClick={() => setEnabled((v) => !v)}
       className="lg-surface lg-pill w-8 h-8 text-gray-300
-                 hover:text-white transition-colors flex items-center justify-center flex-shrink-0"
+                 hover:text-white flex items-center justify-center flex-shrink-0"
       aria-label={enabled ? 'Mute ambient music' : 'Play ambient music'}
       title={enabled ? 'Mute ambient music' : 'Play ambient music'}
     >

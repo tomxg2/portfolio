@@ -606,7 +606,7 @@ export default function EyeTrackingControl({ onTrackingData }) {
       <button
         onClick={toggle}
         disabled={loading}
-        className={`lg-surface lg-pill w-8 h-8 transition-colors
+        className={`lg-surface lg-pill w-8 h-8
                     flex items-center justify-center flex-shrink-0 disabled:opacity-50
                     ${active ? 'lg-tint-teal text-brand-teal' : 'text-gray-300 hover:text-white'}`}
         aria-label={active ? 'Stop eye tracking' : 'Start eye tracking'}
@@ -793,7 +793,7 @@ function CalibrationOverlay({ tick, progressRef, onStart, onSkip, onCancel }) {
           initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
         >
-          <div className="max-w-md w-full lg-surface lg-card rounded-2xl px-8 py-7 text-center"
+          <div className="max-w-md w-full lg-surface lg-card px-8 py-7 text-center"
             style={{ borderColor: 'rgba(0,255,204,0.25)', boxShadow: '0 0 60px rgba(0,255,204,0.12)' }}
           >
             <div className="mx-auto mb-4 w-14 h-14 rounded-2xl lg-surface lg-tint-teal flex items-center justify-center">

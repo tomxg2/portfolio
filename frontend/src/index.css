@@ -17,6 +17,12 @@
     overflow-x: hidden;
   }
 
+  button:focus-visible,
+  a:focus-visible {
+    outline: 2px solid #00ffcc;
+    outline-offset: 3px;
+  }
+
   /* Custom scrollbar */
   ::-webkit-scrollbar {
     width: 6px;
@@ -63,14 +69,27 @@
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
   }
+}
 
+/* registered so the tinted rims can animate their conic start angle */
+@property --lg-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 140deg;
+}
+
+@layer components {
   /* ── Liquid glass system ───────────────────────────────────────────────
      Bold iOS 26-style frosted surface with:
        • heavy blur + saturate (the "wet" look)
        • flowing background gradient (water-like drift)
        • soft specular sweep on hover
        • soft chromatic ring border with slow drift
-     Compose with .lg-surface (base) + variants. */
+     Compose with .lg-surface (base) + variants.
+
+     Lives in the components layer so Tailwind utilities override it — in
+     particular `fixed` / `absolute` beat the `position: relative` below
+     (in the utilities layer it won, pulling fixed panels into the flow). */
   .lg-surface {
     position: relative;
     background:
@@ -98,7 +117,8 @@
       background-position 1.2s cubic-bezier(0.4, 0, 0.2, 1),
       box-shadow 0.6s cubic-bezier(0.4, 0, 0.2, 1),
       transform 0.6s cubic-bezier(0.4, 0, 0.2, 1),
-      border-color 0.6s ease;
+      border-color 0.6s ease,
+      color 0.2s ease;
     animation: lg-drift 18s ease-in-out infinite;
   }
 
@@ -188,7 +208,7 @@
 
   /* Accent tints — softer rims, no harsh contrast, gentle outer halo */
   .lg-tint-teal::after {
-    background: conic-gradient(from 140deg,
+    background: conic-gradient(from var(--lg-angle),
       rgba(0,255,204,0.42), rgba(255,255,255,0.55),
       rgba(0,255,204,0.30), rgba(255,255,255,0.40),
       rgba(0,255,204,0.42));
@@ -201,7 +221,7 @@
       0 0 32px rgba(0,255,204,0.16); }
 
   .lg-tint-purple::after {
-    background: conic-gradient(from 140deg,
+    background: conic-gradient(from var(--lg-angle),
       rgba(167,139,250,0.42), rgba(255,255,255,0.55),
       rgba(167,139,250,0.30), rgba(255,255,255,0.40),
       rgba(167,139,250,0.42));
@@ -214,7 +234,7 @@
       0 0 32px rgba(167,139,250,0.20); }
 
   .lg-tint-blue::after {
-    background: conic-gradient(from 140deg,
+    background: conic-gradient(from var(--lg-angle),
       rgba(96,165,250,0.42), rgba(255,255,255,0.55),
       rgba(96,165,250,0.30), rgba(255,255,255,0.40),
       rgba(96,165,250,0.42));
@@ -226,14 +246,18 @@
       0 10px 40px rgba(0,0,0,0.45),
       0 0 32px rgba(96,165,250,0.20); }
 
-  /* Very slow conic rotation — feels like surface flow, not a spinner */
-  @keyframes lg-spin {
-    to { transform: rotate(1turn); }
+  /* Very slow conic flow — feels like surface flow, not a spinner.
+     Animates the gradient's start angle, NOT the pseudo-element: rotating
+     ::after swung the masked 1px border ring (a rectangle) across the
+     surface as diagonal lines. Without @property support the ring just
+     stays still at 140deg. */
+  @keyframes lg-ring-flow {
+    to { --lg-angle: 500deg; }
   }
   .lg-tint-teal::after,
   .lg-tint-purple::after,
   .lg-tint-blue::after {
-    animation: lg-spin 32s linear infinite;
+    animation: lg-ring-flow 32s linear infinite;
   }
 
   /* Slightly stronger panel surface — for full content cards
@@ -248,25 +272,7 @@
     -webkit-backdrop-filter: blur(28px) saturate(160%);
   }
 
-  /* Gesture CTA — breathing halo + occasional wave to draw the eye */
-  @keyframes gesture-cta-breathe {
-    0%, 100% {
-      box-shadow:
-        inset 0 1px 0 rgba(255,255,255,0.26),
-        0 0 28px rgba(0,255,204,0.38),
-        0 0 56px rgba(0,255,204,0.20);
-    }
-    50% {
-      box-shadow:
-        inset 0 1px 0 rgba(255,255,255,0.32),
-        0 0 36px rgba(0,255,204,0.55),
-        0 0 80px rgba(0,255,204,0.32);
-    }
-  }
-  .gesture-cta-pulse {
-    animation: gesture-cta-breathe 2.4s ease-in-out infinite;
-  }
-  /* Hand emoji wave — short burst every few seconds */
+  /* Gesture CTA hand icon — short burst every few seconds */
   @keyframes gesture-cta-wave {
     0%, 70%, 100% { transform: rotate(0deg); }
     78% { transform: rotate(-18deg); }
@@ -286,7 +292,6 @@
     .lg-tint-teal::after,
     .lg-tint-purple::after,
     .lg-tint-blue::after { animation: none; }
-    .gesture-cta-pulse,
     .gesture-cta-wave { animation: none; }
   }
 }

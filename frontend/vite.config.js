@@ -14,17 +14,4 @@ export default defineConfig({
       'Cross-Origin-Embedder-Policy': 'require-corp',
     },
   },
-  build: {
-    rollupOptions: {
-      output: {
-        // Separate Three.js into its own chunk for better caching
-        manualChunks: {
-          three: ['three'],
-          'react-three': ['@react-three/fiber', '@react-three/drei', '@react-three/postprocessing'],
-          react: ['react', 'react-dom'],
-          motion: ['framer-motion'],
-        },
-      },
-    },
-  },
 });

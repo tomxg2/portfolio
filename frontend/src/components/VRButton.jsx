@@ -18,7 +18,7 @@ export default function VRButton() {
     <button
       onClick={() => xrStore.enterVR()}
       className="lg-surface lg-pill w-8 h-8 text-gray-300
-                 hover:text-white transition-colors flex items-center justify-center flex-shrink-0"
+                 hover:text-white flex items-center justify-center flex-shrink-0"
       aria-label="Enter VR"
       title="Enter VR (immersive)"
     >
