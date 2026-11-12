@@ -47,29 +47,27 @@ export default function Portfolio() {
 
       <main id="main-content" tabIndex={-1}>
         <section className="portfolio-intro portfolio-container" id="top" aria-labelledby="portfolio-name">
-          <p className="portfolio-eyebrow"><span /> Software developer apprentice</p>
-          <h1 id="portfolio-name">Tom Hiestand<span>.</span></h1>
+          <p className="portfolio-eyebrow">Software developer apprentice</p>
+          <h1 id="portfolio-name">Tom Hiestand</h1>
           <div className="portfolio-intro-bottom">
-            <p>I build useful tools at <strong>Swisscom</strong>.<br />And unusual things on the internet.</p>
+            <p>I build internal apps and workflow automations at <strong>Swisscom</strong>. In my own time I make browser experiments with 3D graphics and hand tracking.</p>
             <p className="portfolio-location"><MapPin size={16} /> Zurich, Switzerland</p>
-            <a className="portfolio-text-link" href="#work">Selected work <ArrowDown size={18} /></a>
+            <a className="portfolio-text-link" href="#work">Projects <ArrowDown size={18} /></a>
           </div>
         </section>
 
         <section className="portfolio-work portfolio-container" id="work" aria-labelledby="work-heading">
           <div className="portfolio-section-heading">
-            <h2 id="work-heading">Selected work</h2>
-            <span className="portfolio-eyebrow">Interactive projects</span>
+            <h2 id="work-heading">Projects</h2>
           </div>
           <article className="portfolio-feature">
             <div className="portfolio-feature-caption">
               <div><span className="portfolio-project-number">01</span><h3>Solar system portfolio</h3></div>
               <p>React / Three.js / MediaPipe</p>
-              <a className="portfolio-text-link" href="/lab">Open experiment <ArrowUpRight size={17} /></a>
+              <a className="portfolio-text-link" href="/lab">Open the 3D site <ArrowUpRight size={17} /></a>
             </div>
             <a className="portfolio-feature-image" href="/lab" aria-label="Open the interactive solar-system portfolio">
               <img src="/solar-system.jpg" alt="The actual 3D portfolio: a glowing sun surrounded by textured planets and orbital paths" width="1920" height="720" fetchPriority="high" />
-              <span className="portfolio-feature-label">Interactive experiment</span>
               <span className="portfolio-feature-open"><ArrowUpRight size={24} aria-hidden="true" /></span>
             </a>
           </article>
@@ -97,18 +95,18 @@ export default function Portfolio() {
 
         <section className="portfolio-about" id="about" aria-labelledby="about-heading">
           <div className="portfolio-container portfolio-about-grid">
-            <div><p className="portfolio-eyebrow">A little context</p><h2 id="about-heading">Practical by day.<br />Curious by default.</h2></div>
+            <div><h2 id="about-heading">About</h2></div>
             <div className="portfolio-about-copy">
-              <p>I'm a software developer apprentice at Swisscom Powerbuilders in Zurich. My work spans internal applications, workflow automation, and full-stack web development.</p>
-              <p>Outside of work, I explore 3D graphics, interactive experiences, and the small details that make software feel good to use.</p>
-              <p>Also: football, games, and something playing in my headphones.</p>
-              <div className="portfolio-skills"><h3>What I work with</h3><p>React, TypeScript, Node.js, Power Apps, Power Automate, SharePoint, Supabase, Three.js, and Azure DevOps.</p></div>
+              <p>I'm an apprentice software developer on the Powerbuilders team at Swisscom in Zurich. Most of my work there is Power Apps, Power Automate flows, and SharePoint for internal teams, plus some full-stack web development.</p>
+              <p>Outside work I build things for the browser, mostly Three.js scenes and input experiments with webcam hand tracking. The solar-system site and Airform both started that way.</p>
+              <p>I also play football, play games, and usually have music on.</p>
+              <div className="portfolio-skills"><h3>Tools</h3><p>React, TypeScript, Node.js, Power Apps, Power Automate, SharePoint, Supabase, Three.js, and Azure DevOps.</p></div>
             </div>
           </div>
         </section>
 
         <section className="portfolio-experience portfolio-container" id="experience" aria-labelledby="experience-heading">
-          <div className="portfolio-section-heading"><h2 id="experience-heading">Learning by building.</h2><span className="portfolio-eyebrow">The path so far</span></div>
+          <div className="portfolio-section-heading"><h2 id="experience-heading">Experience</h2><span className="portfolio-eyebrow">Apprenticeship and school</span></div>
           <div className="portfolio-timeline">
             {experience.timeline.map((item) => (
               <article key={item.title} className="portfolio-role">
@@ -122,13 +120,13 @@ export default function Portfolio() {
 
         <section className="portfolio-contact" id="contact" aria-labelledby="contact-heading">
           <div className="portfolio-container portfolio-contact-grid">
-            <div><p className="portfolio-eyebrow">Have something in mind?</p><h2 id="contact-heading">Let's make<br />something good.</h2><p>A project, a question, or a conversation.<br />I'd be glad to hear from you.</p><a className="portfolio-contact-direct" href="https://github.com/tomxg2" target="_blank" rel="noreferrer">Find me on GitHub <ArrowUpRight size={17} /></a></div>
+            <div><h2 id="contact-heading">Contact</h2><p>Use the form and I'll reply by email, or find my code on GitHub.</p><a className="portfolio-contact-direct" href="https://github.com/tomxg2" target="_blank" rel="noreferrer">github.com/tomxg2 <ArrowUpRight size={17} /></a></div>
             <div className="portfolio-contact-form"><ContactCard content={contact} color="#ddf866" showHeading={false} showLinks={false} /></div>
           </div>
         </section>
       </main>
 
-      <footer className="portfolio-footer portfolio-container"><a href="#top">Tom Hiestand</a><span>Zurich, Switzerland</span><a href="/lab">The 3D experiment <ArrowUpRight size={15} /></a></footer>
+      <footer className="portfolio-footer portfolio-container"><a href="#top">Tom Hiestand</a><span>Zurich, Switzerland</span><a href="/lab">3D version <ArrowUpRight size={15} /></a></footer>
     </div>
   );
 }

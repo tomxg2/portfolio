@@ -45,7 +45,7 @@ async function openPage(viewport = { width: 1440, height: 1000 }, mobile = false
 
 async function openHome(page, hash = '') {
   await page.goto(`${baseUrl}/${hash}`, { waitUntil: 'networkidle' });
-  await page.getByRole('heading', { name: 'Tom Hiestand.', exact: true }).waitFor();
+  await page.getByRole('heading', { name: 'Tom Hiestand', exact: true }).waitFor();
   await page.evaluate(() => document.fonts.ready);
 }
 
@@ -199,7 +199,7 @@ test('the optional experiment renders on desktop and mobile and returns to the p
         page.waitForURL(`${baseUrl}/`, { waitUntil: 'domcontentloaded', timeout: 20000 }),
         page.getByRole('link', { name: 'Back to portfolio' }).click({ noWaitAfter: true }),
       ]);
-      await page.getByRole('heading', { name: 'Tom Hiestand.', exact: true }).waitFor();
+      await page.getByRole('heading', { name: 'Tom Hiestand', exact: true }).waitFor();
       assert.equal(await page.locator('canvas').count(), 0);
     } finally { await close(); }
   }
@@ -222,7 +222,7 @@ test('WebGL failure keeps project content and the return link usable', async () 
     await page.keyboard.press('Escape');
     await page.getByRole('dialog').waitFor({ state: 'hidden' });
     await page.getByRole('link', { name: 'Back to portfolio' }).click();
-    await page.getByRole('heading', { name: 'Tom Hiestand.', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Tom Hiestand', exact: true }).waitFor();
   } finally { await close(); }
 });
 
