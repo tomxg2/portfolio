@@ -41,6 +41,16 @@ const projects = [
     cta: 'Play it',
   },
   {
+    title: 'Desk OS',
+    kind: 'Interactive site',
+    year: '2026',
+    description: 'This portfolio again, as a small desktop. Drag windows around, run commands in a working terminal, play a pocket version of Airform, and send me a message from the mail app.',
+    tech: ['React', 'Canvas 2D', 'Web Audio', 'Pointer Events'],
+    art: 'desk',
+    href: '/desk',
+    cta: 'Boot it',
+  },
+  {
     title: 'Powerbuilders apps',
     kind: 'Work · Swisscom',
     year: '2025–',
@@ -123,6 +133,8 @@ function ProjectCard({ project, index }) {
             <AirformWaves animate={motion} />
             <span className="work-art-label mono" aria-hidden="true"><span className="dot" />Live · moves with your cursor</span>
           </>
+        ) : project.art === 'desk' ? (
+          <DeskPreview />
         ) : (
           <div className="work-type" aria-hidden="true">
             {project.internal.map((name) => <span key={name}>{name}</span>)}
@@ -143,6 +155,18 @@ function ProjectCard({ project, index }) {
           : <p className="mono work-note">Internal to Swisscom, so there's no public demo.</p>}
       </div>
     </article>
+  );
+}
+
+function DeskPreview() {
+  return (
+    <div className="desk-preview" aria-hidden="true">
+      <div className="dp-bar"><b>th<span>.</span>os</b><span>About</span><span>Projects</span><span>Contact</span><span className="dp-clock">Zurich</span></div>
+      <div className="dp-win dp-about"><i>About.txt</i><p>Tom <em>Hiestand</em></p></div>
+      <div className="dp-win dp-projects"><i>Projects</i><div className="dp-orbit"><span /><span /><span /></div></div>
+      <div className="dp-win dp-term"><i>Terminal</i><code>tom@zurich ~ % fetch<br />role  apprentice developer<br />stack React · Three.js</code></div>
+      <div className="dp-dock"><span /><span /><span /><span /><span /><span /></div>
+    </div>
   );
 }
 
