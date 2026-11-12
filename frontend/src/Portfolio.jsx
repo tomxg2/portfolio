@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowUpRight } from 'lucide-react';
 import { ContactCard } from './components/NodeCard.jsx';
 import { NODES } from './data/nodes.js';
+import AirformWaves from './home/AirformWaves.jsx';
 import './portfolio.css';
 
 const OrbitField = lazy(() => import('./home/OrbitField.jsx'));
@@ -35,8 +36,7 @@ const projects = [
     year: '2026',
     description: 'A browser instrument you play by pinching the air in front of your webcam, or with mouse, touch, and keyboard. Three FM synth voices and a choice of keys and scales. It records takes you can download, and the wave field reacts to the sound.',
     tech: ['Tone.js', 'Web Audio', 'MediaPipe Hands', 'Three.js'],
-    image: '/airform.jpg',
-    alt: 'Airform: a field of glowing wave lines bending around the cursor while a note plays',
+    art: 'airform',
     href: '/instrument',
     cta: 'Play it',
   },
@@ -90,6 +90,7 @@ function ProjectCard({ project, index }) {
   const mediaRef = useRef(null);
   const videoRef = useRef(null);
   const [cursor, setCursor] = useState(null);
+  const motion = useMotionAllowed();
   const Media = project.href ? 'a' : 'div';
 
   const onMove = (event) => {
@@ -106,7 +107,7 @@ function ProjectCard({ project, index }) {
     <article className="work-card reveal" aria-labelledby={`project-${index}`}>
       <Media
         ref={mediaRef}
-        className={`work-media${project.image ? '' : ' work-media--type'}`}
+        className={`work-media${project.image ? '' : project.art ? ` work-media--${project.art}` : ' work-media--type'}`}
         {...(project.href ? { href: project.href, 'aria-label': `${project.cta}: ${project.title}` } : {})}
         onPointerMove={project.href ? onMove : undefined}
         onPointerEnter={project.href ? onEnter : undefined}
@@ -116,6 +117,11 @@ function ProjectCard({ project, index }) {
           <>
             <img src={project.image} alt={project.alt} width="1920" height="720" loading={index === 0 ? 'eager' : 'lazy'} fetchPriority={index === 0 ? 'high' : undefined} />
             {project.video && <video ref={videoRef} src={project.video} muted loop playsInline preload="none" aria-hidden="true" tabIndex={-1} />}
+          </>
+        ) : project.art === 'airform' ? (
+          <>
+            <AirformWaves animate={motion} />
+            <span className="work-art-label mono" aria-hidden="true"><span className="dot" />Live · moves with your cursor</span>
           </>
         ) : (
           <div className="work-type" aria-hidden="true">
