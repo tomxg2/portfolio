@@ -20,7 +20,7 @@ export const PROJECTS_DATA = {
           title: 'This Portfolio',
           subtitle: 'The site you\'re looking at right now',
           description:
-            'An interactive 3D solar-system portfolio built with React Three Fiber. Each planet is a section of my life — navigate with mouse, touch, or hand gestures via MediaPipe.',
+            'An interactive 3D solar-system portfolio built with React Three Fiber. Each planet is a section of the portfolio. Navigate with mouse, touch, or hand gestures via MediaPipe.',
           tech: ['React', 'Three.js', 'MediaPipe', 'Tailwind CSS', 'Framer Motion', 'Express', 'Supabase'],
           status: 'Live',
           live: null, // it's the site you're on — add a GitHub repo link here instead if public
@@ -29,7 +29,7 @@ export const PROJECTS_DATA = {
           title: 'Airform',
           subtitle: 'A gesture-controlled instrument',
           description:
-            'Play a browser instrument with your hands, mouse, touch, or keyboard. Shape three synthesized voices, explore musical scales, and record performances against an audio-reactive 3D field.',
+            'A browser instrument you play with hand gestures, mouse, touch, or keyboard. It has three FM synth voices and selectable keys and scales, and it records takes you can download. The 3D field reacts to the audio.',
           tech: ['React', 'Three.js', 'Tone.js', 'MediaPipe', 'Web Audio'],
           status: 'Playable',
           live: '/instrument',
@@ -51,7 +51,7 @@ export const PROJECTS_DATA = {
           title: 'Process Automation App',
           subtitle: 'Power Apps + Power Automate',
           description:
-            'Internal tooling that automates repetitive business workflows across Swisscom teams, reducing manual effort significantly.',
+            'Internal apps that automate repetitive workflows for Swisscom teams.',
           tech: ['Power Apps', 'Power Automate', 'SharePoint'],
           status: 'Production',
           private: true,
@@ -60,7 +60,7 @@ export const PROJECTS_DATA = {
           title: 'Analytics Dashboard',
           subtitle: 'Power BI reporting',
           description:
-            'Data visualisation dashboard giving team leads real-time insight into project metrics and KPIs.',
+            'Power BI dashboard team leads use to track project metrics.',
           tech: ['Power BI', 'SharePoint', 'Azure DevOps'],
           status: 'Production',
           private: true,
@@ -92,7 +92,7 @@ export const NODES = [
       subtitle: 'Software Developer Apprentice @ Swisscom Zurich',
       bio: [
         "I'm a 17-year-old developer apprentice at Swisscom Powerbuilders in Zurich, Switzerland. I build internal tools, Power Platform solutions, and full-stack web applications.",
-        "Outside of work I'm obsessed with creative coding — 3D graphics, interactive experiences, and making things that feel alive on screen.",
+        "Outside work I do creative coding: 3D graphics and interactive experiments in the browser.",
         "This portfolio is one of those experiments: a solar system you can navigate with your mouse, touch, or even hand gestures via your webcam.",
       ],
       location: 'Zurich, Switzerland',
@@ -116,7 +116,7 @@ export const NODES = [
     content: {
       type: 'contact',
       title: 'Get in touch',
-      subtitle: "Have a project idea, question, or just want to say hi? I'd love to hear from you.",
+      subtitle: "Send a message and I'll reply by email.",
       location: 'Zurich, Switzerland',
       // shown under the form; type picks the icon (github | email | anything
       // else gets an arrow), e.g.
@@ -194,7 +194,7 @@ export const NODES = [
     content: {
       type: 'experience',
       title: 'Experience',
-      subtitle: 'My professional journey so far',
+      subtitle: 'Apprenticeship and school',
       timeline: [
         {
           date: 'Aug 2025 – Present',
@@ -205,7 +205,7 @@ export const NODES = [
           bullets: [
             'Canvas Apps, Power Automate flows & SharePoint solutions for internal clients',
             'Shipped EVA/LB (apprentice management app) and CPP Buddy Notifications to production',
-            'Agile workflow with Azure DevOps, Sprint Planning & Scrum',
+            'Scrum sprints tracked in Azure DevOps',
           ],
         },
         {
@@ -214,7 +214,7 @@ export const NODES = [
           org: 'Swisscom · Bern, CH',
           color: '#60a5fa',
           bullets: [
-            'Built a Memory App with TypeScript & React, component-based architecture',
+            'Built a Memory app in TypeScript and React',
           ],
         },
         {
@@ -224,7 +224,7 @@ export const NODES = [
           color: '#a78bfa',
           bullets: [
             'Programming foundations course across multiple languages',
-            'Independent projects to build core software development skills',
+            'Small independent projects',
           ],
         },
         {
@@ -331,7 +331,7 @@ export const NODES = [
       title: 'Outside the Code',
       subtitle: "What keeps me busy when I'm not staring at a screen",
       interests: [
-        { name: 'Football',        icon: 'football', desc: 'Playing & watching the beautiful game' },
+        { name: 'Football',        icon: 'football', desc: 'Playing and watching' },
         { name: 'Gaming',          icon: 'gaming',   desc: 'Competitive FPS & strategy games' },
         { name: 'Creative Coding', icon: 'coding',   desc: 'Experiments & interactive demos' },
         { name: 'Music',           icon: 'music',    desc: 'Always something in the headphones' },
