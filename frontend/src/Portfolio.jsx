@@ -3,6 +3,7 @@ import { ArrowUpRight } from 'lucide-react';
 import { ContactCard } from './components/NodeCard.jsx';
 import { NODES } from './data/nodes.js';
 import AirformWaves from './home/AirformWaves.jsx';
+import SolarOrbits from './home/SolarOrbits.jsx';
 import './portfolio.css';
 
 const OrbitField = lazy(() => import('./home/OrbitField.jsx'));
@@ -24,9 +25,7 @@ const projects = [
     year: '2025–26',
     description: 'My first portfolio, built as a solar system you fly through. Each planet is a section. You can steer with mouse, touch, webcam hand gestures, or your eyes, and step into a cockpit that has its own flight audio.',
     tech: ['React Three Fiber', 'Three.js', 'MediaPipe', 'WebXR', 'Supabase'],
-    image: '/solar-system.jpg',
-    video: '/transitions/sun_warp.mp4',
-    alt: 'The 3D portfolio: a glowing sun surrounded by textured planets and orbital paths',
+    art: 'solar',
     href: '/lab',
     cta: 'Fly through it',
   },
@@ -127,6 +126,11 @@ function ProjectCard({ project, index }) {
           <>
             <img src={project.image} alt={project.alt} width="1920" height="720" loading={index === 0 ? 'eager' : 'lazy'} fetchPriority={index === 0 ? 'high' : undefined} />
             {project.video && <video ref={videoRef} src={project.video} muted loop playsInline preload="none" aria-hidden="true" tabIndex={-1} />}
+          </>
+        ) : project.art === 'solar' ? (
+          <>
+            <SolarOrbits animate={motion} />
+            <span className="work-art-label mono" aria-hidden="true"><span className="dot" />Live · tilts with your cursor</span>
           </>
         ) : project.art === 'airform' ? (
           <>

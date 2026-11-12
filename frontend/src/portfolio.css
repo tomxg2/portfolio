@@ -92,6 +92,9 @@ html.home-root { scroll-behavior: smooth; }
 .work-media:hover img { transform: scale(1.035); }
 .work-media:hover video { opacity: 0.42; }
 div.work-media { cursor: default; }
+.work-media--solar { background: radial-gradient(60% 90% at 50% 50%, rgba(255, 170, 80, 0.12), transparent 70%), #07080c; }
+.solar-orbits { position: absolute; inset: 0; width: 100%; height: 100%; transition: transform 1.4s var(--ease); }
+.work-media--solar:hover .solar-orbits { transform: scale(1.03); }
 .work-media--airform { background: radial-gradient(80% 90% at 50% 50%, rgba(120, 230, 200, 0.08), transparent 70%), linear-gradient(rgba(236, 235, 228, 0.03) 1px, transparent 1px) 0 0 / 100% 48px, #0f1513; }
 .airform-waves { position: absolute; inset: 0; width: 100%; height: 100%; transition: transform 1.4s var(--ease); }
 .work-media--airform:hover .airform-waves { transform: scale(1.02); }

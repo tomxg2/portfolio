@@ -61,7 +61,7 @@ test('homepage exposes work without downloading the 3D runtime', async () => {
       .filter((entry) => /\/assets\/.*\.js/.test(entry.name))
       .reduce((total, entry) => total + entry.decodedBodySize, 0));
     assert.ok(bytes > 0 && bytes < 400000, `Homepage JavaScript: ${bytes} bytes`);
-    assert.equal(await page.locator('.work-media img').first().evaluate((image) => image.naturalWidth), 1920);
+    assert.equal(await page.locator('.work-media--solar svg [data-planet]').count(), 6);
     await page.screenshot({ path: join(screenshots, 'desktop-home.png') });
   } finally { await close(); }
 });
