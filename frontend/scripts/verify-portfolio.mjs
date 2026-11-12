@@ -61,25 +61,23 @@ test('homepage exposes work without downloading the 3D runtime', async () => {
       .filter((entry) => /\/assets\/.*\.js/.test(entry.name))
       .reduce((total, entry) => total + entry.decodedBodySize, 0));
     assert.ok(bytes > 0 && bytes < 400000, `Homepage JavaScript: ${bytes} bytes`);
-    assert.equal(await page.locator('.portfolio-feature img').evaluate((image) => image.naturalWidth), 1920);
+    assert.equal(await page.locator('.work-media--solar svg [data-planet]').count(), 6);
     await page.screenshot({ path: join(screenshots, 'desktop-home.png') });
   } finally { await close(); }
 });
 
-test('project details are keyboard-operable and section deep links survive reload', async () => {
+test('project links are keyboard-operable and section deep links survive reload', async () => {
   const { page, close } = await openPage();
   try {
     await openHome(page);
-    const summaries = await page.locator('.portfolio-project summary').all();
-    assert.equal(summaries.length, 1);
+    assert.equal(await page.locator('.work-card').count(), 4);
     await page.getByRole('heading', { name: 'Airform', exact: true }).waitFor();
-    for (const summary of summaries) {
-      await summary.focus();
-      await summary.press('Enter');
-      assert.equal(await summary.evaluate((element) => element.parentElement.open), true);
-      await summary.press('Space');
-      assert.equal(await summary.evaluate((element) => element.parentElement.open), false);
-    }
+    const projectLinks = page.locator('.work-link');
+    assert.deepEqual(await projectLinks.evaluateAll((links) => links.map((link) => link.getAttribute('href'))), ['/lab', '/instrument', '/desk']);
+    await projectLinks.nth(1).focus();
+    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('href')), '/instrument');
+    await Promise.all([page.waitForURL('**/instrument'), page.keyboard.press('Enter')]);
+    await page.getByRole('heading', { name: 'Airform.', exact: true }).waitFor();
     await openHome(page, '#contact');
     await page.waitForFunction(() => {
       const heading = document.getElementById('contact-heading').getBoundingClientRect();
@@ -203,6 +201,54 @@ test('the optional experiment renders on desktop and mobile and returns to the p
       assert.equal(await page.locator('canvas').count(), 0);
     } finally { await close(); }
   }
+});
+
+test('Desk OS windows drag, the terminal runs commands, and the dock reopens closed apps', async () => {
+  const { page, close } = await openPage();
+  try {
+    await page.goto(`${baseUrl}/desk`, { waitUntil: 'networkidle' });
+    await page.getByRole('heading', { name: 'About.txt', exact: true }).waitFor();
+    const about = page.locator('[data-win="about"]');
+    const before = await about.boundingBox();
+    const bar = await about.locator('.titlebar').boundingBox();
+    await page.mouse.move(bar.x + 60, bar.y + bar.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(bar.x + 180, bar.y + 90, { steps: 6 });
+    await page.mouse.up();
+    const after = await about.boundingBox();
+    const expectedDy = 90 - bar.height / 2;
+    assert.ok(Math.abs(after.x - before.x - 120) < 3 && Math.abs(after.y - before.y - expectedDy) < 3, `window moved by ${after.x - before.x},${after.y - before.y}`);
+
+    const terminal = page.getByRole('textbox', { name: 'Terminal command' });
+    await terminal.fill('projects');
+    await terminal.press('Enter');
+    await page.locator('[data-term-out]').filter({ hasText: 'airform/' }).waitFor();
+    await terminal.fill('open exp');
+    await terminal.press('Enter');
+    await page.getByRole('heading', { name: 'Experience.pdf', exact: true }).waitFor();
+
+    await page.getByRole('button', { name: 'Close Experience' }).click();
+    assert.equal(await page.locator('[data-win="exp"]').isHidden(), true);
+    await page.getByRole('navigation', { name: 'Dock' }).getByRole('button', { name: 'Contact' }).click();
+    await page.getByRole('heading', { name: 'New message', exact: true }).waitFor();
+    await page.locator('[data-win="mail"]').getByLabel('Name', { exact: true }).waitFor();
+
+    await page.getByRole('navigation', { name: 'Dock' }).getByRole('button', { name: 'Projects' }).click();
+    await page.getByRole('tab', { name: 'Airform' }).click();
+    await page.locator('[data-p-action] a[href="/instrument"]').waitFor();
+    await page.screenshot({ path: join(screenshots, 'desk-desktop.png') });
+
+    await Promise.all([page.waitForURL(`${baseUrl}/`), page.getByRole('link', { name: 'Back to portfolio' }).click()]);
+    await page.getByRole('heading', { name: 'Tom Hiestand', exact: true }).waitFor();
+  } finally { await close(); }
+
+  const phone = await openPage({ width: 390, height: 844 }, true);
+  try {
+    await phone.page.goto(`${baseUrl}/desk`, { waitUntil: 'networkidle' });
+    await phone.page.getByRole('heading', { name: 'About.txt', exact: true }).waitFor();
+    assert.equal(await phone.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1 && document.querySelector('.desk-os').scrollWidth <= innerWidth + 1), true, 'Desk OS overflows on a phone');
+    await phone.page.screenshot({ path: join(screenshots, 'desk-mobile.png') });
+  } finally { await phone.close(); }
 });
 
 test('WebGL failure keeps project content and the return link usable', async () => {
