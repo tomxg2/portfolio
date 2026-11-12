@@ -143,3 +143,6 @@ html.desk-root, html.desk-root body { height: 100%; margin: 0; overflow: hidden;
 .desk-os .about .about-name { margin: 0; }
 .desk-os .w-projects .body { display: flex; }
 .desk-os .w-projects .finder { flex: 1; height: auto; }
+@media (min-width: 761px) { .desk-os .w-projects { height: min(520px, calc(100vh - 110px)) !important; } }
+.desk-os .finder .detail { overflow: auto; }
+.desk-os .term-line input, .desk-os .term-line input:focus { border: 0; box-shadow: none; outline: none; }
