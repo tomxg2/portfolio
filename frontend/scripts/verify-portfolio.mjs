@@ -61,25 +61,23 @@ test('homepage exposes work without downloading the 3D runtime', async () => {
       .filter((entry) => /\/assets\/.*\.js/.test(entry.name))
       .reduce((total, entry) => total + entry.decodedBodySize, 0));
     assert.ok(bytes > 0 && bytes < 400000, `Homepage JavaScript: ${bytes} bytes`);
-    assert.equal(await page.locator('.portfolio-feature img').evaluate((image) => image.naturalWidth), 1920);
+    assert.equal(await page.locator('.work-media img').first().evaluate((image) => image.naturalWidth), 1920);
     await page.screenshot({ path: join(screenshots, 'desktop-home.png') });
   } finally { await close(); }
 });
 
-test('project details are keyboard-operable and section deep links survive reload', async () => {
+test('project links are keyboard-operable and section deep links survive reload', async () => {
   const { page, close } = await openPage();
   try {
     await openHome(page);
-    const summaries = await page.locator('.portfolio-project summary').all();
-    assert.equal(summaries.length, 1);
+    assert.equal(await page.locator('.work-card').count(), 3);
     await page.getByRole('heading', { name: 'Airform', exact: true }).waitFor();
-    for (const summary of summaries) {
-      await summary.focus();
-      await summary.press('Enter');
-      assert.equal(await summary.evaluate((element) => element.parentElement.open), true);
-      await summary.press('Space');
-      assert.equal(await summary.evaluate((element) => element.parentElement.open), false);
-    }
+    const projectLinks = page.locator('.work-link');
+    assert.deepEqual(await projectLinks.evaluateAll((links) => links.map((link) => link.getAttribute('href'))), ['/lab', '/instrument']);
+    await projectLinks.nth(1).focus();
+    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('href')), '/instrument');
+    await Promise.all([page.waitForURL('**/instrument'), page.keyboard.press('Enter')]);
+    await page.getByRole('heading', { name: 'Airform.', exact: true }).waitFor();
     await openHome(page, '#contact');
     await page.waitForFunction(() => {
       const heading = document.getElementById('contact-heading').getBoundingClientRect();

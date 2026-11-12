@@ -1,25 +1,191 @@
-import { useEffect, useState } from 'react';
-import { ArrowDown, ArrowUpRight, Plus, MapPin } from 'lucide-react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { ArrowUpRight } from 'lucide-react';
 import { ContactCard } from './components/NodeCard.jsx';
-import { NODES, PROJECTS_DATA } from './data/nodes.js';
+import { NODES } from './data/nodes.js';
 import './portfolio.css';
+
+const OrbitField = lazy(() => import('./home/OrbitField.jsx'));
 
 const experience = NODES.find((node) => node.id === 'experience').content;
 const contact = NODES.find((node) => node.id === 'contact').content;
+
 const navigation = [
   { id: 'work', label: 'Work' },
   { id: 'about', label: 'About' },
   { id: 'experience', label: 'Experience' },
   { id: 'contact', label: 'Contact' },
 ];
+
 const projects = [
-  ...PROJECTS_DATA.personal.content.projects.slice(1).map((project) => ({ ...project, category: 'Personal' })),
+  {
+    title: 'Solar system portfolio',
+    kind: 'Interactive 3D',
+    year: '2025–26',
+    description: 'My first portfolio, built as a solar system you fly through. Each planet is a section. You can steer with mouse, touch, webcam hand gestures, or your eyes, and step into a cockpit that has its own flight audio.',
+    tech: ['React Three Fiber', 'Three.js', 'MediaPipe', 'WebXR', 'Supabase'],
+    image: '/solar-system.jpg',
+    video: '/transitions/sun_warp.mp4',
+    alt: 'The 3D portfolio: a glowing sun surrounded by textured planets and orbital paths',
+    href: '/lab',
+    cta: 'Fly through it',
+  },
+  {
+    title: 'Airform',
+    kind: 'Instrument',
+    year: '2026',
+    description: 'A browser instrument you play by pinching the air in front of your webcam, or with mouse, touch, and keyboard. Three FM synth voices and a choice of keys and scales. It records takes you can download, and the wave field reacts to the sound.',
+    tech: ['Tone.js', 'Web Audio', 'MediaPipe Hands', 'Three.js'],
+    image: '/airform.jpg',
+    alt: 'Airform: a field of glowing wave lines bending around the cursor while a note plays',
+    href: '/instrument',
+    cta: 'Play it',
+  },
+  {
+    title: 'Powerbuilders apps',
+    kind: 'Work · Swisscom',
+    year: '2025–',
+    description: 'Internal Power Platform apps for Swisscom teams. I shipped EVA/LB, which manages apprentices, and CPP Buddy Notifications. Both are Canvas Apps backed by Power Automate flows and SharePoint, planned in Scrum sprints on Azure DevOps.',
+    tech: ['Power Apps', 'Power Automate', 'SharePoint', 'Azure DevOps'],
+    internal: ['EVA/LB', 'CPP Buddy Notifications'],
+  },
 ];
+
+const statement = [
+  ['I', 'build', 'internal', 'tools', 'at', 'Swisscom', 'by', 'day:', 'Power', 'Apps,', 'flows', 'and', 'SharePoint', 'for', 'teams', 'that', 'need', 'them', 'to', 'just', 'work.'],
+  ['After', 'hours', 'I', 'write', 'shaders,', 'synths', 'and', 'hand', 'tracking', 'for', 'the', 'browser.'],
+];
+
+const tools = ['React', 'TypeScript', 'Three.js', 'WebGL', 'Node.js', 'Supabase', 'Tone.js', 'MediaPipe', 'Power Apps', 'Power Automate', 'SharePoint', 'Azure DevOps'];
+
+function useZurichTime() {
+  const [time, setTime] = useState(() => formatZurich());
+  useEffect(() => {
+    const id = setInterval(() => setTime(formatZurich()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return time;
+}
+
+function formatZurich() {
+  return new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Zurich', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date());
+}
+
+function useMotionAllowed() {
+  const [allowed, setAllowed] = useState(() => !window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => setAllowed(!query.matches);
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+  return allowed;
+}
+
+function Clock() {
+  const time = useZurichTime();
+  return <span className="mono">ZRH <time aria-label="Local time in Zurich">{time}</time></span>;
+}
+
+function ProjectCard({ project, index }) {
+  const mediaRef = useRef(null);
+  const videoRef = useRef(null);
+  const [cursor, setCursor] = useState(null);
+  const Media = project.href ? 'a' : 'div';
+
+  const onMove = (event) => {
+    const rect = mediaRef.current.getBoundingClientRect();
+    setCursor({ x: event.clientX - rect.left, y: event.clientY - rect.top });
+  };
+  const onEnter = () => { videoRef.current?.play().catch(() => {}); };
+  const onLeave = () => {
+    setCursor(null);
+    if (videoRef.current) { videoRef.current.pause(); videoRef.current.currentTime = 0; }
+  };
+
+  return (
+    <article className="work-card reveal" aria-labelledby={`project-${index}`}>
+      <Media
+        ref={mediaRef}
+        className={`work-media${project.image ? '' : ' work-media--type'}`}
+        {...(project.href ? { href: project.href, 'aria-label': `${project.cta}: ${project.title}` } : {})}
+        onPointerMove={project.href ? onMove : undefined}
+        onPointerEnter={project.href ? onEnter : undefined}
+        onPointerLeave={project.href ? onLeave : undefined}
+      >
+        {project.image ? (
+          <>
+            <img src={project.image} alt={project.alt} width="1920" height="720" loading={index === 0 ? 'eager' : 'lazy'} fetchPriority={index === 0 ? 'high' : undefined} />
+            {project.video && <video ref={videoRef} src={project.video} muted loop playsInline preload="none" aria-hidden="true" tabIndex={-1} />}
+          </>
+        ) : (
+          <div className="work-type" aria-hidden="true">
+            {project.internal.map((name) => <span key={name}>{name}</span>)}
+          </div>
+        )}
+        {cursor && <span className="work-cursor" style={{ transform: `translate(${cursor.x}px, ${cursor.y}px) translate(-50%, -50%)` }} aria-hidden="true">{project.cta} <ArrowUpRight size={14} /></span>}
+      </Media>
+      <div className="work-info">
+        <span className="mono work-index">{String(index + 1).padStart(2, '0')}</span>
+        <div className="work-title">
+          <h3 id={`project-${index}`}>{project.title}</h3>
+          <p className="mono">{project.kind} · {project.year}</p>
+        </div>
+        <p className="work-description">{project.description}</p>
+        <ul className="work-tech" aria-label="Technologies">{project.tech.map((item) => <li key={item}>{item}</li>)}</ul>
+        {project.href
+          ? <a className="pill-link work-link" href={project.href}>{project.cta} <ArrowUpRight size={15} /></a>
+          : <p className="mono work-note">Internal to Swisscom, so there's no public demo.</p>}
+      </div>
+    </article>
+  );
+}
+
+function Statement() {
+  const ref = useRef(null);
+  const [progress, setProgress] = useState(1);
+  const motion = useMotionAllowed();
+  const total = statement.flat().length;
+
+  useEffect(() => {
+    if (!motion) { setProgress(1); return undefined; }
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const rect = ref.current.getBoundingClientRect();
+      const start = window.innerHeight * 0.85;
+      const end = window.innerHeight * 0.3;
+      setProgress(Math.min(Math.max((start - rect.top) / (start - end + rect.height * 0.6), 0), 1));
+    };
+    const onScroll = () => { if (!frame) frame = requestAnimationFrame(update); };
+    update();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => { cancelAnimationFrame(frame); window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onScroll); };
+  }, [motion]);
+
+  let count = 0;
+  return (
+    <p ref={ref} className="statement">
+      {statement.map((line, lineIndex) => (
+        <span key={lineIndex} className={lineIndex ? 'statement-line serif' : 'statement-line'}>
+          {line.map((word, wordIndex) => {
+            const lit = count++ / total < progress;
+            return <span key={wordIndex} className={lit ? 'is-lit' : undefined}>{word}{' '}</span>;
+          })}
+        </span>
+      ))}
+    </p>
+  );
+}
 
 export default function Portfolio() {
   const [activeSection, setActiveSection] = useState('');
+  const [fieldFailed, setFieldFailed] = useState(false);
+  const motion = useMotionAllowed();
+  const onUnavailable = useCallback(() => setFieldFailed(true), []);
 
   useEffect(() => {
+    document.documentElement.classList.add('home-root');
     const frame = requestAnimationFrame(() => {
       document.getElementById(window.location.hash.slice(1))?.scrollIntoView({ behavior: 'instant' });
     });
@@ -28,105 +194,120 @@ export default function Portfolio() {
       if (visible.length) setActiveSection(visible[visible.length - 1].target.id);
     }, { rootMargin: '-15% 0px -65% 0px', threshold: 0 });
     navigation.forEach(({ id }) => observer.observe(document.getElementById(id)));
+
+    const reveals = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => { if (entry.isIntersecting) { entry.target.classList.add('is-in'); reveals.unobserve(entry.target); } });
+    }, { rootMargin: '0px 0px -10% 0px' });
+    document.querySelectorAll('.reveal').forEach((element) => reveals.observe(element));
+
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
+      reveals.disconnect();
+      document.documentElement.classList.remove('home-root');
     };
   }, []);
 
   return (
     <div className="portfolio">
       <a className="portfolio-skip" href="#main-content">Skip to content</a>
-      <header className="portfolio-header">
-        <a className="portfolio-wordmark" href="#top" aria-label="Tom Hiestand, home">th.</a>
+      <header className="site-header">
+        <a className="wordmark" href="#top" aria-label="Tom Hiestand, home">th<span>.</span></a>
         <nav aria-label="Main navigation">
           {navigation.map(({ id, label }) => <a key={id} href={`#${id}`} aria-current={activeSection === id ? 'location' : undefined}>{label}</a>)}
         </nav>
-        <a className="portfolio-github" href="https://github.com/tomxg2" target="_blank" rel="noreferrer">GitHub <ArrowUpRight size={16} /></a>
+        <a className="header-github" href="https://github.com/tomxg2" target="_blank" rel="noreferrer">GitHub <ArrowUpRight size={14} /></a>
       </header>
 
       <main id="main-content" tabIndex={-1}>
-        <section className="portfolio-intro portfolio-container" id="top" aria-labelledby="portfolio-name">
-          <p className="portfolio-eyebrow">Software developer apprentice</p>
-          <h1 id="portfolio-name">Tom Hiestand</h1>
-          <div className="portfolio-intro-bottom">
-            <p>I build internal apps and workflow automations at <strong>Swisscom</strong>. In my own time I make browser experiments with 3D graphics and hand tracking.</p>
-            <p className="portfolio-location"><MapPin size={16} /> Zurich, Switzerland</p>
-            <a className="portfolio-text-link" href="#work">Projects <ArrowDown size={18} /></a>
+        <section className="hero" id="top" aria-labelledby="portfolio-name">
+          <div className={`hero-backdrop${motion && !fieldFailed ? '' : ' is-static'}`} aria-hidden="true">
+            {motion && !fieldFailed && <Suspense fallback={null}><OrbitField onUnavailable={onUnavailable} /></Suspense>}
+          </div>
+          <div className="hero-corners mono">
+            <p><span className="dot" aria-hidden="true" />Software developer apprentice</p>
+            <p>Swisscom · Zurich, CH</p>
+            <p className="hero-clock"><Clock /></p>
+          </div>
+          <div className="hero-body">
+            <p className="hero-lede">I build internal apps and workflow automations at Swisscom. In my own time I make browser experiments with 3D graphics, sound, and hand tracking.</p>
+            <h1 id="portfolio-name" className="hero-name">
+              <span className="hero-name-first">Tom</span> <span className="hero-name-last serif">Hiestand</span>
+            </h1>
           </div>
         </section>
 
-        <section className="portfolio-work portfolio-container" id="work" aria-labelledby="work-heading">
-          <div className="portfolio-section-heading">
-            <h2 id="work-heading">Projects</h2>
+        <section className="work" id="work" aria-labelledby="work-heading">
+          <div className="section-bar">
+            <h2 id="work-heading">Selected work</h2>
+            <span className="mono">({String(projects.length).padStart(2, '0')})</span>
           </div>
-          <article className="portfolio-feature">
-            <div className="portfolio-feature-caption">
-              <div><span className="portfolio-project-number">01</span><h3>Solar system portfolio</h3></div>
-              <p>React / Three.js / MediaPipe</p>
-              <a className="portfolio-text-link" href="/lab">Open the 3D site <ArrowUpRight size={17} /></a>
-            </div>
-            <a className="portfolio-feature-image" href="/lab" aria-label="Open the interactive solar-system portfolio">
-              <img src="/solar-system.jpg" alt="The actual 3D portfolio: a glowing sun surrounded by textured planets and orbital paths" width="1920" height="720" fetchPriority="high" />
-              <span className="portfolio-feature-open"><ArrowUpRight size={24} aria-hidden="true" /></span>
-            </a>
-          </article>
-          <div className="portfolio-projects">
-            {projects.map((project, index) => (
-              <details className="portfolio-project" key={project.title}>
-                <summary>
-                  <span className="portfolio-project-number">{String(index + 2).padStart(2, '0')}</span>
-                  <span className="portfolio-project-title"><h3>{project.title}</h3><span>{project.subtitle}</span></span>
-                  <span className="portfolio-project-category">{project.category}</span>
-                  <span className="portfolio-project-status">{project.status}</span>
-                  <Plus size={20} className="portfolio-project-expand" aria-hidden="true" />
-                </summary>
-                <div className="portfolio-project-detail">
-                  <p>{project.description}</p>
-                  <ul aria-label="Technologies">{project.tech.map((technology) => <li key={technology}>{technology}</li>)}</ul>
-                  {project.private && <p className="portfolio-project-note">Internal Swisscom project. Source code and client details are confidential.</p>}
-                  {project.github && <a className="portfolio-text-link" href={project.github} target="_blank" rel="noreferrer">Source code <ArrowUpRight size={16} /></a>}
-                  {project.live && <a className="portfolio-text-link" href={project.live} target="_blank" rel="noreferrer">Live project <ArrowUpRight size={16} /></a>}
-                </div>
-              </details>
-            ))}
+          <div className="work-list">
+            {projects.map((project, index) => <ProjectCard key={project.title} project={project} index={index} />)}
           </div>
         </section>
 
-        <section className="portfolio-about" id="about" aria-labelledby="about-heading">
-          <div className="portfolio-container portfolio-about-grid">
-            <div><h2 id="about-heading">About</h2></div>
-            <div className="portfolio-about-copy">
-              <p>I'm an apprentice software developer on the Powerbuilders team at Swisscom in Zurich. Most of my work there is Power Apps, Power Automate flows, and SharePoint for internal teams, plus some full-stack web development.</p>
-              <p>Outside work I build things for the browser, mostly Three.js scenes and input experiments with webcam hand tracking. The solar-system site and Airform both started that way.</p>
-              <p>I also play football, play games, and usually have music on.</p>
-              <div className="portfolio-skills"><h3>Tools</h3><p>React, TypeScript, Node.js, Power Apps, Power Automate, SharePoint, Supabase, Three.js, and Azure DevOps.</p></div>
+        <section className="about" id="about" aria-labelledby="about-heading">
+          <div className="section-bar">
+            <h2 id="about-heading">About</h2>
+            <span className="mono">Zurich, CH</span>
+          </div>
+          <Statement />
+          <div className="about-grid">
+            <dl className="facts reveal">
+              <div><dt className="mono">Now</dt><dd>Apprentice software developer, Powerbuilders team at Swisscom</dd></div>
+              <div><dt className="mono">Training</dt><dd>Informatiker EFZ, application development, since 2024</dd></div>
+              <div><dt className="mono">Off screen</dt><dd>Football, games, and usually music on</dd></div>
+            </dl>
+            <div className="tools reveal" aria-labelledby="tools-heading">
+              <h3 id="tools-heading" className="mono">Tools I use</h3>
+              <ul>{tools.map((tool) => <li key={tool}>{tool}</li>)}</ul>
             </div>
           </div>
         </section>
 
-        <section className="portfolio-experience portfolio-container" id="experience" aria-labelledby="experience-heading">
-          <div className="portfolio-section-heading"><h2 id="experience-heading">Experience</h2><span className="portfolio-eyebrow">Apprenticeship and school</span></div>
-          <div className="portfolio-timeline">
+        <section className="experience" id="experience" aria-labelledby="experience-heading">
+          <div className="section-bar">
+            <h2 id="experience-heading">Experience</h2>
+            <span className="mono">2024 — now</span>
+          </div>
+          <ol className="roles">
             {experience.timeline.map((item) => (
-              <article key={item.title} className="portfolio-role">
-                <p className="portfolio-role-date">{item.date}</p>
-                <div><h3>{item.title}</h3><p className="portfolio-role-org">{item.org}</p><ul>{item.bullets.map((bullet) => <li key={bullet}>{bullet}</li>)}</ul></div>
-                {item.current && <span className="portfolio-current">Current</span>}
-              </article>
+              <li key={item.title} className="role reveal">
+                <p className="mono role-date">{item.date}</p>
+                <div className="role-main">
+                  <h3>{item.title}</h3>
+                  <p className="role-org">{item.org}</p>
+                </div>
+                <ul className="role-points">{item.bullets.map((bullet) => <li key={bullet}>{bullet}</li>)}</ul>
+                {item.current && <span className="role-current mono">Current</span>}
+              </li>
             ))}
-          </div>
+          </ol>
         </section>
 
-        <section className="portfolio-contact" id="contact" aria-labelledby="contact-heading">
-          <div className="portfolio-container portfolio-contact-grid">
-            <div><h2 id="contact-heading">Contact</h2><p>Use the form and I'll reply by email, or find my code on GitHub.</p><a className="portfolio-contact-direct" href="https://github.com/tomxg2" target="_blank" rel="noreferrer">github.com/tomxg2 <ArrowUpRight size={17} /></a></div>
-            <div className="portfolio-contact-form"><ContactCard content={contact} color="#ddf866" showHeading={false} showLinks={false} /></div>
+        <section className="contact" id="contact" aria-labelledby="contact-heading">
+          <div className="contact-grid">
+            <div className="contact-intro">
+              <p className="mono"><span className="dot" aria-hidden="true" />Replies by email</p>
+              <h2 id="contact-heading">Contact</h2>
+              <p>Questions about a project, an apprenticeship, or something you'd like built: send a message and I'll write back.</p>
+              <a className="pill-link" href="https://github.com/tomxg2" target="_blank" rel="noreferrer">github.com/tomxg2 <ArrowUpRight size={15} /></a>
+            </div>
+            <div className="contact-form"><ContactCard content={contact} color="#ddf866" showHeading={false} showLinks={false} /></div>
           </div>
         </section>
       </main>
 
-      <footer className="portfolio-footer portfolio-container"><a href="#top">Tom Hiestand</a><span>Zurich, Switzerland</span><a href="/lab">3D version <ArrowUpRight size={15} /></a></footer>
+      <footer className="site-footer">
+        <p className="footer-name">Tom Hiestand</p>
+        <ul className="footer-links">
+          <li><a href="/lab">3D version <ArrowUpRight size={13} /></a></li>
+          <li><a href="/instrument">Airform <ArrowUpRight size={13} /></a></li>
+          <li><a href="https://github.com/tomxg2" target="_blank" rel="noreferrer">GitHub <ArrowUpRight size={13} /></a></li>
+        </ul>
+        <p className="mono footer-meta"><Clock /> · © {new Date().getFullYear()}</p>
+      </footer>
     </div>
   );
 }

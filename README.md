@@ -47,6 +47,7 @@ frontend/   Vite + React 18 + React Three Fiber + Tailwind
   src/main.jsx              lazy entry selection: homepage or /lab
   src/Portfolio.jsx         homepage, project index, experience, contact
   src/portfolio.css         homepage visual system and responsive layout
+  src/home/OrbitField.jsx   homepage hero: dependency-free WebGL2 particle orbit field
   src/instrument/           Airform audio engine, visual field, controls, and unit tests
   src/data/nodes.js         project details and experience data
   src/App.jsx               optional 3D portfolio and input wiring
